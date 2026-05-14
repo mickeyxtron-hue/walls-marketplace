@@ -36,7 +36,7 @@ if (IS_PROD && (!JWT_SECRET || !SESSION_SECRET)) {
 }
 
 // ---------- Filesystem ----------
-const uploadsDir = path.join(__dirname, 'public/uploads');
+const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
 // ---------- App ----------
@@ -766,10 +766,10 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
 
 // ---------- Static & SPA fallback ----------
 app.use('/uploads', express.static(uploadsDir, { maxAge: '7d', immutable: true }));
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1d' }));
+//app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1d' }));
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+//app.get('*', (_req, res) => //res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.use((err, _req, res, _next) => {
   console.error('Server error:', err);

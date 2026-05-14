@@ -1,0 +1,142 @@
+{
+  "users": [
+    {
+      "id": "u1",
+      "name": "Site Admin",
+      "email": "admin@wheels-walls.app",
+      "password": "ChangeMeNow!123",
+      "phone": "+0000000000",
+      "phoneAlt": "",
+      "isAdmin": true,
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "u2",
+      "name": "John Doe",
+      "email": "john@example.com",
+      "password": "password123",
+      "phone": "+263771000000",
+      "phoneAlt": "",
+      "isAdmin": false,
+      "createdAt": "2025-06-15T10:20:00.000Z"
+    },
+    {
+      "id": "u3",
+      "name": "Jane Seller",
+      "email": "jane@sellers.co",
+      "password": "janepass",
+      "phone": "+263772111222",
+      "phoneAlt": "+263774333444",
+      "isAdmin": false,
+      "createdAt": "2025-07-20T09:15:00.000Z"
+    }
+  ],
+
+  "listings": [
+    {
+      "id": "l1",
+      "title": "Toyota Corolla 2015",
+      "price": "7500",
+      "location": "Harare, Zimbabwe",
+      "description": "Well maintained, 120,000 km, petrol. New tyres, full service history.",
+      "category": "w_light_vehicles",
+      "topCategory": "wheels",
+      "type": "sell",
+      "owner": "john@example.com",
+      "ownerId": "u2",
+      "contact": { "phone": "+263771000000", "email": "john@example.com" },
+      "images": ["/public/uploads/toyota1.jpg", "/public/uploads/toyota2.jpg"],
+      "isSponsored": false,
+      "createdAt": "2025-09-10T08:30:00.000Z"
+    },
+    {
+      "id": "l2",
+      "title": "Isuzu Tipper 2012",
+      "price": "12000",
+      "location": "Bulawayo, Zimbabwe",
+      "description": "Heavy-duty tipper truck, well serviced, ready for work.",
+      "category": "w_heavy_vehicles",
+      "topCategory": "wheels",
+      "type": "sell",
+      "owner": "jane@sellers.co",
+      "ownerId": "u3",
+      "contact": { "phone": "+263772111222", "email": "jane@sellers.co" },
+      "images": ["/public/uploads/isuzu1.jpg"],
+      "isSponsored": false,
+      "createdAt": "2025-09-12T11:00:00.000Z"
+    },
+    {
+      "id": "l3",
+      "title": "Motorcycle - Yamaha YBR 125",
+      "price": "900",
+      "location": "Mutare, Zimbabwe",
+      "description": "Good condition, economical commuter bike.",
+      "category": "w_motorcycles",
+      "topCategory": "wheels",
+      "type": "sell",
+      "owner": "john@example.com",
+      "ownerId": "u2",
+      "contact": { "phone": "+263771000000", "email": "john@example.com" },
+      "images": ["/public/uploads/yamaha1.jpg"],
+      "isSponsored": false,
+      "createdAt": "2025-09-15T14:45:00.000Z"
+    },
+    {
+      "id": "l4",
+      "title": "2-Bedroom Flat for Rent - Downtown",
+      "price": "350",
+      "location": "Harare, Zimbabwe",
+      "description": "Spacious 2-bedroom flat, close to amenities, secure building.",
+      "category": "wa_rent_flats",
+      "topCategory": "walls",
+      "type": "rent",
+      "owner": "jane@sellers.co",
+      "ownerId": "u3",
+      "contact": { "phone": "+263774333444", "email": "jane@sellers.co" },
+      "images": ["/public/uploads/flat1.jpg","/public/uploads/flat2.jpg"],
+      "isSponsored": false,
+      "createdAt": "2025-08-05T09:30:00.000Z"
+    },
+    {
+      "id": "l5",
+      "title": "3-Bedroom House for Sale - Suburbs",
+      "price": "45000",
+      "location": "Harare, Zimbabwe",
+      "description": "Well-built 3-bedroom house with garden and borehole access.",
+      "category": "wa_sell_houses",
+      "topCategory": "walls",
+      "type": "sell",
+      "owner": "admin@wheels-walls.app",
+      "ownerId": "u1",
+      "contact": { "phone": "+0000000000", "email": "admin@wheels-walls.app" },
+      "images": ["/public/uploads/house1.jpg"],
+      "isSponsored": true,
+      "createdAt": "2025-09-01T07:00:00.000Z"
+    },
+    {
+      "id": "l6",
+      "title": "Appliances & Furniture - Moving Sale",
+      "price": "Varies",
+      "location": "Gweru, Zimbabwe",
+      "description": "Various household appliances and furniture. Contact to view pictures and prices.",
+      "category": "wa_appliances",
+      "topCategory": "walls",
+      "type": "sell",
+      "owner": "john@example.com",
+      "ownerId": "u2",
+      "contact": { "phone": "+263771000000", "email": "john@example.com" },
+      "images": [],
+      "isSponsored": false,
+      "createdAt": "2025-07-22T12:10:00.000Z"
+    }
+  ],
+
+  "uploads": [
+    { "id": "up1", "path": "/public/uploads/toyota1.jpg", "originalName": "toyota1.jpg", "uploadedAt": "2025-09-10T08:25:00.000Z" },
+    { "id": "up2", "path": "/public/uploads/toyota2.jpg", "originalName": "toyota2.jpg", "uploadedAt": "2025-09-10T08:26:00.000Z" },
+    { "id": "up3", "path": "/public/uploads/isuzu1.jpg", "originalName": "isuzu1.jpg", "uploadedAt": "2025-09-12T10:55:00.000Z" },
+    { "id": "up4", "path": "/public/uploads/yamaha1.jpg", "originalName": "yamaha1.jpg", "uploadedAt": "2025-09-15T14:40:00.000Z" },
+    { "id": "up5", "path": "/public/uploads/flat1.jpg", "originalName": "flat1.jpg", "uploadedAt": "2025-08-05T09:20:00.000Z" },
+    { "id": "up6", "path": "/public/uploads/house1.jpg", "originalName": "house1.jpg", "uploadedAt": "2025-09-01T06:50:00.000Z" }
+  ]
+}

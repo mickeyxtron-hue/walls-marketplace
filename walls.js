@@ -3753,7 +3753,7 @@ HOW TO USE THE APP:
       img.alt = listing.title;
       img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s;';
     } else {
-      imgContainer.style.background = 'linear-gradient(135deg, #2E7D32 0%, #1B5E20 100%)';
+      imgContainer.style.background = '#f0f0f0';
     }
     
     if (listing.isAd) {
@@ -3885,7 +3885,7 @@ HOW TO USE THE APP:
       img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
       imgContainer.appendChild(img);
     } else {
-      imgContainer.style.background = 'linear-gradient(135deg, #2E7D32 0%, #1B5E20 100%)';
+      imgContainer.style.background = '#f0f0f0';
     }
     
     if (listing.isAd) {
@@ -3921,7 +3921,7 @@ HOW TO USE THE APP:
     }
     likeButton.addEventListener('click', (e) => { e.stopPropagation(); this.toggleLike(listing.id); });
     imgContainer.appendChild(likeButton);
-    imgContainer.appendChild(img);
+    // (image already appended above when present)
     
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position: absolute; bottom: 0; left: 0; right: 0; padding: 8px; background: linear-gradient(transparent, rgba(0,0,0,0.8)); border-radius: 0 0 10px 10px; color: white; display: flex; flex-direction: column; gap: 2px; z-index: 2; font-size: 11px;';
@@ -5538,16 +5538,14 @@ HOW TO USE THE APP:
     const isMac = /Macintosh/.test(ua) && !isIOS;
     const isWin = /Windows/.test(ua);
     let instr = '';
-    if (isIOS) {
-      instr = '<p><strong>iPhone / iPad:</strong></p><ol style="padding-left:20px;line-height:1.8;"><li>Tap the <b>Share</b> button <i class="fas fa-share-square"></i> at the bottom of Safari.</li><li>Scroll and tap <b>"Add to Home Screen"</b>.</li><li>Tap <b>Add</b> in the top right.</li></ol>';
+    if (isIOS || isMac) {
+      instr = '<p>Direct install is not available on iOS or macOS.</p><p style="color:#666;font-size:13px;">You can keep using Walls in your browser.</p>';
     } else if (isAndroid) {
       instr = '<p><strong>Android:</strong></p><ol style="padding-left:20px;line-height:1.8;"><li>Tap the menu <b>⋮</b> in Chrome.</li><li>Choose <b>"Install app"</b> or <b>"Add to Home screen"</b>.</li><li>Confirm <b>Install</b>.</li></ol>';
-    } else if (isMac) {
-      instr = '<p><strong>Mac (Safari 17+ / Chrome / Edge):</strong></p><ol style="padding-left:20px;line-height:1.8;"><li>Open the <b>File</b> menu in Safari and choose <b>"Add to Dock"</b>, or in Chrome/Edge click the install icon <i class="fas fa-download"></i> in the address bar.</li><li>Confirm <b>Install</b>.</li></ol>';
     } else if (isWin) {
       instr = '<p><strong>Windows (Chrome / Edge):</strong></p><ol style="padding-left:20px;line-height:1.8;"><li>Click the install icon <i class="fas fa-download"></i> in the address bar (or the <b>⋮</b> menu &rarr; <b>Install Walls</b>).</li><li>Confirm <b>Install</b>.</li></ol>';
     } else {
-      instr = '<p>Use your browser menu and choose <b>"Install app"</b> or <b>"Add to Home Screen"</b>.</p>';
+      instr = '<p>Use your browser menu and choose <b>"Install app"</b>.</p>';
     }
     const modal = document.createElement('div');
     modal.className = 'modal';

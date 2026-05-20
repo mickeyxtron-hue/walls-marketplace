@@ -869,6 +869,17 @@ window.WW_APP = {
     if (l.occupancyStatus === undefined && this._getRentalCategories().includes(l.category)) {
       l.occupancyStatus = 'vacant';
     }
+    // Sanitize images: only keep usable sources (data URLs or absolute URLs).
+    // Bare backend filenames like "listing-123.png" would 404, so drop them
+    // to avoid the broken-image tray icon with the alt text showing.
+    if (Array.isArray(l.images)) {
+      l.images = l.images.filter(function(src) {
+        if (!src || typeof src !== 'string') return false;
+        return /^(data:|https?:|\/\/)/i.test(src);
+      });
+    } else {
+      l.images = [];
+    }
     return l;
   },
 
@@ -3750,8 +3761,9 @@ HOW TO USE THE APP:
       img = document.createElement('img');
       img.loading = 'lazy';
       img.src = listing.images[0];
-      img.alt = listing.title;
+      img.alt = '';
       img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s;';
+      img.onerror = function() { this.style.display = 'none'; imgContainer.style.background = '#f0f0f0'; };
     } else {
       imgContainer.style.background = '#f0f0f0';
     }
@@ -3881,8 +3893,9 @@ HOW TO USE THE APP:
       img = document.createElement('img');
       img.loading = 'lazy';
       img.src = listing.images[0];
-      img.alt = listing.title;
+      img.alt = '';
       img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+      img.onerror = function() { this.style.display = 'none'; imgContainer.style.background = '#f0f0f0'; };
       imgContainer.appendChild(img);
     } else {
       imgContainer.style.background = '#f0f0f0';
@@ -5065,7 +5078,13 @@ HOW TO USE THE APP:
         if (!finalListing.clientId) finalListing.clientId = finalListing.id;
         // POST to backend first, then merge server response (may add server id, etc.)
         return this.createListingOnBackend(finalListing).then(saved => {
-          const merged = this._normalizeListing(Object.assign({}, finalListing, saved || {}));
+          // Merge backend response first, then override with finalListing so
+          // local data-URL images are preserved (backend often returns bare
+          // filenames that 404 on the static host).
+          const mergedRaw = Object.assign({}, saved || {}, finalListing);
+          if (saved && saved.id) mergedRaw.id = saved.id;
+          if (saved && saved._id) mergedRaw._id = saved._id;
+          const merged = this._normalizeListing(mergedRaw);
           this.listings = this.listings.filter(item => item.id !== merged.id && item.clientId !== merged.clientId);
           this.listings.unshift(merged);
           this.saveListingsToStorage();

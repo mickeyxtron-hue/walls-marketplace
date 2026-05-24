@@ -11,8 +11,8 @@ window.WW_APP = window.WW_APP || {};
 window.WW_OAUTH = window.WW_OAUTH || {
   GOOGLE_CLIENT_ID: '463654130792-2ct7p5m2556nnrtmpm3ocuj6rfa2tisl.apps.googleusercontent.com',
   GOOGLE_VERIFY_URL: 'https://walls-marketplace.onrender.com/api/auth/google/verify',
-  EMAIL_LOGIN_URL: 'https://walls-marketplace.onrender.com/api/login',
-  EMAIL_REGISTER_URL: 'https://walls-marketplace.onrender.com/api/register'
+  EMAIL_LOGIN_URL: 'https://walls-marketplace.onrender.com/api/auth/login',
+  EMAIL_REGISTER_URL: 'https://walls-marketplace.onrender.com/api/auth/signup'
 };
 
 // ============= BACKEND API (listings persistence) =============
@@ -79,6 +79,11 @@ window._wwWarmBackend = function() {
 };
 // Fire warm-up as soon as this script loads.
 window._wwWarmBackend();
+try {
+  if (window.WW_API && window.WW_API.API_BASE) {
+    localStorage.setItem('ww_api_base', window.WW_API.API_BASE);
+  }
+} catch (_) {}
 
 // Lazy script loader
 function _wwLoadScript(src, id) {
@@ -316,6 +321,92 @@ window.WW_APP = {
     return formatted;
   },
 
+  _categoryCatalog: function() {
+    const walls = (this.categories && this.categories.walls) ? this.categories.walls : this._getDefaultWallsCategories();
+    return walls || [];
+  },
+
+  _resolveCategoryLabel: function(listing) {
+    if (!listing) return 'Uncategorized';
+    if (listing.categoryLabel) return listing.categoryLabel;
+    const key = listing.category || (listing.fields && listing.fields.category);
+    if (!key) return 'Uncategorized';
+    const found = this._categoryCatalog().find(function(c) { return c.key === key; });
+    return found ? found.label : key;
+  },
+
+  _resolveListingImages: function(images) {
+    const base = ((window.WW_API && window.WW_API.API_BASE) || '').replace(/\/$/, '');
+    const out = [];
+    (images || []).forEach(function(src) {
+      if (!src || typeof src !== 'string') return;
+      const s = src.trim();
+      if (!s) return;
+      if (/^(data:|https?:|\/\/)/i.test(s)) { out.push(s); return; }
+      if (s.startsWith('/')) { out.push(base ? base + s : s); return; }
+      if (/\.(jpe?g|png|gif|webp|avif)(\?|$)/i.test(s) && base) {
+        out.push(base + '/public/uploads/' + s.replace(/^\//, ''));
+        return;
+      }
+      if (base && !s.includes('://')) out.push(base + '/' + s.replace(/^\//, ''));
+    });
+    return out;
+  },
+
+  _listingPropertyMetaSvg: {
+    bed: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7v11M3 7h7a2 2 0 0 1 2 2v2M3 7V5a2 2 0 0 1 2-2h2M10 11h4a2 2 0 0 1 2 2v5M10 11V9a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M14 18h6v-3a2 2 0 0 0-2-2h-2"/></svg>',
+    bath: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16a2 2 0 0 1 2 2v2H2v-2a2 2 0 0 1 2-2z"/><path d="M6 12V7a2 2 0 0 1 2-2h1"/><path d="M12 5h1a2 2 0 0 1 2 2v5"/></svg>',
+    area: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>'
+  },
+
+  _appendListingPropertyMeta: function(card, listing) {
+    const beds = listing.bedrooms || (listing.fields && listing.fields.bedrooms);
+    const baths = listing.bathrooms || (listing.fields && listing.fields.bathrooms);
+    const area = listing.areaSqm || (listing.fields && listing.fields.areaSqm);
+    if (!beds && !baths && !area) return;
+    const row = document.createElement('div');
+    row.className = 'listing-property-meta';
+    const add = function(iconKey, text) {
+      if (!text && text !== 0) return;
+      const item = document.createElement('span');
+      item.className = 'meta-item';
+      item.innerHTML = (window.WW_APP._listingPropertyMetaSvg[iconKey] || '') + '<span>' + String(text) + '</span>';
+      row.appendChild(item);
+    };
+    add('bed', beds);
+    add('bath', baths);
+    if (area) add('area', area + ' m²');
+    if (row.childNodes.length) card.appendChild(row);
+  },
+
+  _prepareBackendListingPayload: function(listing) {
+    const images = Array.isArray(listing.images) ? listing.images.slice() : [];
+    const httpImages = images.filter(function(u) { return u && !String(u).startsWith('data:'); });
+    const imagesBase64 = images.filter(function(u) { return u && String(u).startsWith('data:'); });
+    return {
+      type: listing.type || listing.category,
+      category: listing.category,
+      categoryLabel: listing.categoryLabel,
+      title: listing.title,
+      description: listing.description,
+      price: listing.price,
+      location: listing.location,
+      lat: listing.lat,
+      lng: listing.lng,
+      images: httpImages,
+      imagesBase64: imagesBase64,
+      features: listing.features || [],
+      status: listing.status || 'active',
+      clientId: listing.clientId || listing.id,
+      bedrooms: listing.bedrooms,
+      bathrooms: listing.bathrooms,
+      areaSqm: listing.areaSqm,
+      contact: listing.contact,
+      bidEnabled: listing.bidEnabled,
+      createdAt: listing.createdAt
+    };
+  },
+
 
   ensureListingLayoutStyles: function() {
     if (document.getElementById('ww-listing-layout-styles')) return;
@@ -371,7 +462,7 @@ window.WW_APP = {
         if (this._listingsPollTimer) clearInterval(this._listingsPollTimer);
         this._listingsPollTimer = setInterval(function() {
           try { _self.loadListingsFromStorage(); } catch (_) {}
-        }, 30000);
+        }, 12000);
         window.addEventListener('focus', function() { try { _self.loadListingsFromStorage(); } catch (_) {} });
         document.addEventListener('visibilitychange', function() {
           if (!document.hidden) { try { _self.loadListingsFromStorage(); } catch (_) {} }
@@ -549,12 +640,6 @@ window.WW_APP = {
 
       if (!hasRealManifest) {
         // Fallback: synthesize a manifest only when none is present.
-        const icon = "data:image/svg+xml;utf8," + encodeURIComponent(
-          '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">' +
-          '<rect width="512" height="512" rx="96" fill="#C8B897"/>' +
-          '<path d="M128 240l128-112 128 112v144a16 16 0 0 1-16 16h-80v-96h-64v96h-80a16 16 0 0 1-16-16z" fill="#fff"/>' +
-          '</svg>'
-        );
         const manifest = {
           name: "Walls - Property Marketplace",
           short_name: "Walls",
@@ -562,11 +647,11 @@ window.WW_APP = {
           scope: "/",
           display: "standalone",
           orientation: "any",
-          background_color: "#ffffff",
+          background_color: "#FAF8F3",
           theme_color: "#C8B897",
           icons: [
-            { src: icon, sizes: "192x192", type: "image/svg+xml", purpose: "any maskable" },
-            { src: icon, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }
+            { src: "/icon192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
+            { src: "/icon512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }
           ]
         };
         const manifestUrl = "data:application/manifest+json;charset=utf-8," + encodeURIComponent(JSON.stringify(manifest));
@@ -602,7 +687,7 @@ window.WW_APP = {
             const swCode = "self.addEventListener('install',e=>self.skipWaiting());" +
               "self.addEventListener('activate',e=>self.clients.claim());" +
               "self.addEventListener('fetch',e=>{});" +
-              "self.addEventListener('push',e=>{try{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'Walls',{body:d.body||'',icon:'/icon-192.png',badge:'/icon-192.png',data:d.data||{}}));}catch(_){}})";
+              "self.addEventListener('push',e=>{try{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'Walls',{body:d.body||'',icon:'/icon192.png',badge:'/icon192.png',data:d.data||{}}));}catch(_){}})";
             const blobUrl = URL.createObjectURL(new Blob([swCode], { type: 'text/javascript' }));
             navigator.serviceWorker.register(blobUrl).catch(() => {});
           });
@@ -862,6 +947,16 @@ window.WW_APP = {
   _normalizeListing: function(l) {
     if (!l) return l;
     if (l._id && !l.id) l.id = l._id;
+    if (l.fields && typeof l.fields === 'object') {
+      if (l.fields.bedrooms != null && l.bedrooms == null) l.bedrooms = l.fields.bedrooms;
+      if (l.fields.bathrooms != null && l.bathrooms == null) l.bathrooms = l.fields.bathrooms;
+      if (l.fields.areaSqm != null && l.areaSqm == null) l.areaSqm = l.fields.areaSqm;
+      if (l.fields.categoryLabel && !l.categoryLabel) l.categoryLabel = l.fields.categoryLabel;
+      if (l.fields.clientId && !l.clientId) l.clientId = l.fields.clientId;
+      if (l.fields.contact && !l.contact) l.contact = l.fields.contact;
+    }
+    if (!l.category && l.fields && l.fields.category) l.category = l.fields.category;
+    l.categoryLabel = this._resolveCategoryLabel(l);
     if (!l.contact) l.contact = { name: '', email: '', phone: '' };
     if (l.bidEnabled === undefined) l.bidEnabled = false;
     if (!l.bids) l.bids = [];
@@ -873,17 +968,7 @@ window.WW_APP = {
     if (l.occupancyStatus === undefined && this._getRentalCategories().includes(l.category)) {
       l.occupancyStatus = 'vacant';
     }
-    // Sanitize images: only keep usable sources (data URLs or absolute URLs).
-    // Bare backend filenames like "listing-123.png" would 404, so drop them
-    // to avoid the broken-image tray icon with the alt text showing.
-    if (Array.isArray(l.images)) {
-      l.images = l.images.filter(function(src) {
-        if (!src || typeof src !== 'string') return false;
-        return /^(data:|https?:|\/\/)/i.test(src);
-      });
-    } else {
-      l.images = [];
-    }
+    l.images = this._resolveListingImages(l.images);
     return l;
   },
 
@@ -912,7 +997,7 @@ window.WW_APP = {
     if (!cfg.API_BASE) return;
     // Ask for a generous page so newly-created listings are not hidden by
     // the default 20-item limit.
-    const url = (cfg.LISTINGS || '/api/listings') + '?limit=200&sortBy=createdAt&sortOrder=desc';
+    const url = (cfg.LISTINGS || '/api/listings') + '?limit=200&sort=new';
     const requestId = (self._lastListingsFetchId = (self._lastListingsFetchId || 0) + 1);
     window._wwApi(url, { method: 'GET', timeout: 15000, noAuth: true })
       .then(function(data) {
@@ -948,7 +1033,7 @@ window.WW_APP = {
         self.listings = arr.map(l => self._normalizeListing(l)).map(function(l) {
           if ((!l.images || l.images.length === 0)) {
             const fallback = (l.id && _localImgById[l.id]) || (l.clientId && _localImgByClient[l.clientId]) || (l._id && _localImgById[l._id]);
-            if (fallback && fallback.length) l.images = fallback.slice();
+            if (fallback && fallback.length) l.images = self._resolveListingImages(fallback.slice());
           }
           return l;
         });
@@ -959,7 +1044,10 @@ window.WW_APP = {
           const canRefreshBuyView = self.currentView === 'app' && self.currentMode === 'buy' && !self.currentCategory && !modalOpen;
           const canRefreshCategoryView = self.currentView === 'app' && self.currentMode === 'buy' && self.currentCategory && !modalOpen;
           if (canRefreshCategoryView && typeof self.showFilteredListings === 'function') {
-            const filtered = self.listings.filter(function(listing) { return listing.category === self.currentCategory.key; });
+            const key = self.currentCategory.key;
+            const filtered = self.listings.filter(function(listing) {
+              return listing.category === key || listing.categoryLabel === self.currentCategory.label;
+            });
             self.showFilteredListings(filtered, self.currentCategory.label, true);
           } else if (canRefreshBuyView && typeof self.showAllListings === 'function') {
             self.showAllListings();
@@ -1037,11 +1125,15 @@ window.WW_APP = {
     const cfg = window.WW_API || {};
     if (!listing.clientId) listing.clientId = listing.id;
     if (!cfg.API_BASE) return Promise.resolve(Object.assign({}, listing, { _syncFailed: true }));
-    return window._wwApi(cfg.LISTINGS || '/api/listings', { method: 'POST', body: listing, timeout: 60000 })
+    const payload = this._prepareBackendListingPayload(listing);
+    return window._wwApi(cfg.LISTINGS || '/api/listings', { method: 'POST', body: payload, timeout: 60000 })
       .then(res => {
         const saved = (res && (res.listing || res)) || {};
         if (!saved.id) saved.id = saved.clientId || saved._id || listing.id;
         if (!saved.clientId) saved.clientId = listing.clientId || listing.id;
+        if ((!saved.images || !saved.images.length) && listing.images && listing.images.length) {
+          saved.images = listing.images.slice();
+        }
         return saved;
       })
       .catch(err => {
@@ -1054,7 +1146,7 @@ window.WW_APP = {
     const cfg = window.WW_API || {};
     if (!cfg.API_BASE || !listing || !listing.id) return Promise.resolve(listing);
     return window._wwApi((cfg.LISTING_BY_ID || '/api/listings/') + encodeURIComponent(listing.id),
-      { method: 'PUT', body: listing, timeout: 60000 })
+      { method: 'PUT', body: this._prepareBackendListingPayload(listing), timeout: 60000 })
       .then(res => (res && (res.listing || res)) || listing)
       .catch(err => { console.warn('Update listing failed:', err && err.message); return listing; });
   },
@@ -3631,6 +3723,7 @@ HOW TO USE THE APP:
     if (noListings) noListings.style.display = 'none';
     if (loadMoreContainer) loadMoreContainer.style.display = 'none';
     
+    const self = this;
     const paint = () => {
       if (loadingState) loadingState.style.display = 'none';
       
@@ -3650,10 +3743,9 @@ HOW TO USE THE APP:
         
         const categories = {};
         visibleListings.forEach(listing => {
-          const category = listing.categoryLabel || 'Uncategorized';
-          if (!categories[category]) {
-            categories[category] = [];
-          }
+          const category = self._resolveCategoryLabel(listing);
+          listing.categoryLabel = category;
+          if (!categories[category]) categories[category] = [];
           categories[category].push(listing);
         });
         
@@ -3667,7 +3759,7 @@ HOW TO USE THE APP:
           categoryHeader.className = 'category-header-horizontal';
           
           const headerText = document.createElement('h3');
-          headerText.style.cssText = 'margin: 0; font-size: 20px; font-weight: 600; color: #222222; display: flex; align-items: center; gap: 8px;';
+          headerText.style.cssText = 'margin: 0; font-size: 20px; font-weight: 600; color: var(--text, #222222); display: flex; align-items: center; gap: 8px;';
           
           const icon = this.getCategoryIcon(categoryName);
           headerText.innerHTML = `${icon} ${categoryName}`;
@@ -3868,15 +3960,18 @@ HOW TO USE THE APP:
     card.appendChild(imgContainer);
     
     const titleEl = document.createElement('div');
+    titleEl.className = 'listing-card-title';
     titleEl.textContent = listing.title.length > 40 ? listing.title.substring(0, 40) + '...' : listing.title;
-    titleEl.style.cssText = 'margin: 4px 0 0 0; font-size: 14px; font-weight: 600; color: #222; line-height: 1.3; text-align: left; padding: 0 2px;';
+    titleEl.style.cssText = 'margin: 4px 0 0 0; font-size: 14px; font-weight: 600; color: var(--text, #222); line-height: 1.3; text-align: left; padding: 0 2px;';
     card.appendChild(titleEl);
+    this._appendListingPropertyMeta(card, listing);
 
     // Posted date
     if (listing.createdAt) {
       const dateEl = document.createElement('div');
+      dateEl.className = 'listing-posted';
       dateEl.textContent = 'Posted ' + this.formatRelativeTime(listing.createdAt);
-      dateEl.style.cssText = 'font-size: 11px; color: #888; margin: 2px 2px 0; padding: 0 2px;';
+      dateEl.style.cssText = 'font-size: 11px; color: var(--text-muted, #888); margin: 2px 2px 0; padding: 0 2px;';
       card.appendChild(dateEl);
     }
     
@@ -3981,14 +4076,17 @@ HOW TO USE THE APP:
     card.appendChild(imgContainer);
     
     const title = document.createElement('div');
+    title.className = 'listing-card-title';
     title.textContent = listing.title.length > 30 ? listing.title.substring(0, 30) + '...' : listing.title;
-    title.style.cssText = 'font-size: 12px; font-weight: 600; color: #222; line-height: 1.2; margin: 4px 2px;';
+    title.style.cssText = 'font-size: 12px; font-weight: 600; color: var(--text, #222); line-height: 1.2; margin: 4px 2px;';
     card.appendChild(title);
+    this._appendListingPropertyMeta(card, listing);
 
     if (listing.createdAt) {
       const dateEl = document.createElement('div');
+      dateEl.className = 'listing-posted';
       dateEl.textContent = 'Posted ' + this.formatRelativeTime(listing.createdAt);
-      dateEl.style.cssText = 'font-size: 10px; color: #888; margin: 0 2px 2px;';
+      dateEl.style.cssText = 'font-size: 10px; color: var(--text-muted, #888); margin: 0 2px 2px;';
       card.appendChild(dateEl);
     }
 
@@ -4155,6 +4253,8 @@ HOW TO USE THE APP:
       detailRows.push(['Bedrooms', listing.bedrooms]);
     if (listing.bathrooms !== undefined && listing.bathrooms !== '' && listing.bathrooms !== null)
       detailRows.push(['Bathrooms', listing.bathrooms]);
+    if (listing.areaSqm !== undefined && listing.areaSqm !== '' && listing.areaSqm !== null)
+      detailRows.push(['Area', listing.areaSqm + ' m²']);
     if (listing.categoryLabel) detailRows.push(['Category', listing.categoryLabel]);
     else if (listing.category) detailRows.push(['Category', listing.category]);
     if (listing.occupancyStatus) detailRows.push(['Occupancy', listing.occupancyStatus]);
@@ -4658,7 +4758,7 @@ HOW TO USE THE APP:
           </div>
         </div>
         
-        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
           <div class="form-group">
             <label for="bedrooms">Bedrooms</label>
             <input type="number" id="bedrooms" name="bedrooms" min="0" placeholder="e.g., 3" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
@@ -4666,6 +4766,10 @@ HOW TO USE THE APP:
           <div class="form-group">
             <label for="bathrooms">Bathrooms</label>
             <input type="number" id="bathrooms" name="bathrooms" min="0" placeholder="e.g., 2" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
+          </div>
+          <div class="form-group">
+            <label for="areaSqm">Area (m²) <span style="font-weight:400;color:#888;">(optional)</span></label>
+            <input type="number" id="areaSqm" name="areaSqm" min="0" step="1" placeholder="e.g., 120" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
           </div>
         </div>
       `;
@@ -5081,6 +5185,7 @@ HOW TO USE THE APP:
         listing.features = formData.getAll('features[]');
         listing.bedrooms = formData.get('bedrooms') || '';
         listing.bathrooms = formData.get('bathrooms') || '';
+        listing.areaSqm = formData.get('areaSqm') || '';
       }
       
       if (requiresVerification) {
@@ -5136,6 +5241,8 @@ HOW TO USE THE APP:
           const mergedRaw = Object.assign({}, saved || {}, finalListing);
           if (saved && saved.id) mergedRaw.id = saved.id;
           if (saved && saved._id) mergedRaw._id = saved._id;
+          if (finalListing.images && finalListing.images.length) mergedRaw.images = finalListing.images.slice();
+          if (finalListing.categoryLabel) mergedRaw.categoryLabel = finalListing.categoryLabel;
           const merged = this._normalizeListing(mergedRaw);
           this.listings = this.listings.filter(item => item.id !== merged.id && item.clientId !== merged.clientId);
           this.listings.unshift(merged);

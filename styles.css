@@ -414,6 +414,50 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .category-header-section h2 {
   margin: 0 0 4px;
   font-size: 1.5rem;
+  color: var(--text);
+}
+
+.category-header-horizontal h3 {
+  color: var(--text);
+}
+
+.listing-card-title,
+.listing-card .listing-title-row {
+  color: var(--text);
+}
+
+.listing-card .listing-meta,
+.listing-card .listing-posted {
+  color: var(--text-muted);
+}
+
+.listing-property-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 2px 0;
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.listing-property-meta .meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.listing-property-meta svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  stroke: var(--text-muted);
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .listings-count { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
@@ -659,7 +703,17 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 }
 
 .bottom-nav-tab span,
-.bottom-nav-search span { display: none; letter-spacing: 0.02em; }
+.bottom-nav-search span {
+  display: inline-block;
+  letter-spacing: 0.02em;
+  font-size: 11px;
+  line-height: 1.1;
+  color: var(--nav-inactive-fg);
+  max-width: 4.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .bottom-nav-tab.active {
   background: var(--nav-active-bg);
@@ -668,7 +722,10 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   flex: 1.6;
 }
 
-.bottom-nav-tab.active span { display: inline-block; }
+.bottom-nav-tab.active span,
+.bottom-nav-search:focus span {
+  color: var(--nav-active-fg);
+}
 
 .bottom-nav-tab i,
 .bottom-nav-search i { font-size: 18px; line-height: 1; }
@@ -989,6 +1046,51 @@ input, select, textarea {
   background: var(--surface);
   color: var(--text);
   border-color: var(--border-color);
+}
+
+.main-footer,
+.footer-disclaimer,
+.copyright,
+.footer-connect h4 {
+  color: var(--text);
+}
+
+.footer-disclaimer,
+.copyright {
+  color: var(--text-muted);
+}
+
+.social-links a {
+  color: var(--text-muted);
+}
+
+.feature-card h3 {
+  color: var(--text);
+}
+
+.header-icon-btn {
+  color: var(--text);
+}
+
+.header-icon-btn span {
+  color: var(--text-muted);
+}
+
+.filter-btn,
+.filter-label {
+  color: var(--text);
+}
+
+.filter-value {
+  color: var(--text-muted);
+}
+
+@media (max-width: 480px) {
+  .bottom-nav-tab span,
+  .bottom-nav-search span {
+    font-size: 10px;
+    max-width: 3.2rem;
+  }
 }
 
 .sr-only {

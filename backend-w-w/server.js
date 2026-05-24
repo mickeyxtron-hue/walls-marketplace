@@ -112,8 +112,9 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(cookieParser());
 
-// Serve index.html, walls.js, manifest, icons, sw.js, etc.
-app.use(express.static(path.join(__dirname), {
+// Serve frontend (index.html, walls.js, icons) from ../frontend-w-w when present
+const FRONTEND_DIR = path.join(__dirname, '..', 'frontend-w-w');
+app.use(express.static(FRONTEND_DIR, {
   setHeaders(res, filePath) {
     if (filePath.endsWith('sw.js')) {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -124,6 +125,7 @@ app.use(express.static(path.join(__dirname), {
     }
   },
 }));
+app.use(express.static(path.join(__dirname)));
 
 // ---------------------------------------------------------------------------
 // Database
@@ -283,11 +285,14 @@ function publicUser(u) {
 
 function publicListing(doc, viewerId) {
   const o = doc.toObject ? doc.toObject() : doc;
+  const fields = o.fields && typeof o.fields === 'object' ? o.fields : {};
   return {
     id         : o._id?.toString?.() || o.id,
+    clientId   : fields.clientId || o.clientId || undefined,
     ownerId    : o.ownerId?.toString?.() || o.ownerId,
-    type       : o.type,
-    category   : o.category,
+    type       : o.type || fields.type,
+    category   : o.category || fields.category,
+    categoryLabel: fields.categoryLabel || o.categoryLabel || '',
     title      : o.title,
     description: o.description,
     price      : o.price,
@@ -298,18 +303,55 @@ function publicListing(doc, viewerId) {
     lng        : o.lng,
     images     : Array.isArray(o.images)   ? o.images   : [],
     features   : Array.isArray(o.features) ? o.features : [],
-    fields     : o.fields || {},
-    likeCount  : Array.isArray(o.likedBy) ? o.likedBy.length : 0,
-    likedByMe  : viewerId ? (o.likedBy || []).some(id => id.toString() === viewerId) : false,
+    bedrooms   : fields.bedrooms ?? o.bedrooms ?? '',
+    bathrooms  : fields.bathrooms ?? o.bathrooms ?? '',
+    areaSqm    : fields.areaSqm ?? o.areaSqm ?? '',
+    contact    : fields.contact || o.contact || {},
+    bidEnabled : fields.bidEnabled ?? o.bidEnabled ?? false,
     bids       : (o.bids || []).map(b => ({
       userId   : b.userId?.toString?.(),
       amount   : b.amount,
       createdAt: b.createdAt,
     })),
+    fields,
+    likeCount  : Array.isArray(o.likedBy) ? o.likedBy.length : 0,
+    likedByMe  : viewerId ? (o.likedBy || []).some(id => id.toString() === viewerId) : false,
     views      : o.views || 0,
     status     : o.status,
     createdAt  : o.createdAt,
     updatedAt  : o.updatedAt,
+  };
+}
+
+function wallsListingToDoc(body, ownerId) {
+  const known = new Set([
+    'type', 'category', 'title', 'description', 'price', 'currency', 'location',
+    'lat', 'lng', 'images', 'imagesBase64', 'features', 'status',
+  ]);
+  const extras = {};
+  for (const k of Object.keys(body || {})) {
+    if (!known.has(k)) extras[k] = body[k];
+  }
+  if (body.clientId) extras.clientId = body.clientId;
+  if (body.categoryLabel) extras.categoryLabel = body.categoryLabel;
+  if (body.bedrooms != null) extras.bedrooms = body.bedrooms;
+  if (body.bathrooms != null) extras.bathrooms = body.bathrooms;
+  if (body.areaSqm != null) extras.areaSqm = body.areaSqm;
+  if (body.contact) extras.contact = body.contact;
+  return {
+    ownerId,
+    type: body.type || body.category,
+    category: body.category,
+    title: body.title || '',
+    description: body.description || '',
+    price: toNumberPrice(body.price),
+    currency: body.currency || 'USD',
+    location: body.location || '',
+    lat: body.lat ? Number(body.lat) : undefined,
+    lng: body.lng ? Number(body.lng) : undefined,
+    features: Array.isArray(body.features) ? body.features : (tryParseJson(body.features, []) || []),
+    fields: extras,
+    status: body.status || 'active',
   };
 }
 
@@ -357,25 +399,13 @@ app.get('/api/health', (_req, res) => {
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
-app.post('/api/auth/signup', async (req, res) => {
-  try {
-    const { email, password, name, phone } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: 'email + password required' });
-    const exists = await User.findOne({ email: String(email).toLowerCase() });
-    if (exists) return res.status(409).json({ error: 'email already registered' });
-    const hash = await bcrypt.hash(String(password), 10);
-    const user = await User.create({
-      email   : String(email).toLowerCase(),
-      password: hash,
-      name    : name  || '',
-      phone   : phone || '',
-      lastLoginAt: new Date(),
-    });
-    res.json({ token: signToken(user), user: publicUser(user) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+app.get('/api/user', authRequired, async (req, res) => {
+  const u = await User.findById(req.user.id);
+  if (!u) return res.status(404).json({ error: 'not found' });
+  res.json({ user: publicUser(u) });
 });
 
-app.post('/api/auth/login', async (req, res) => {
+async function handleAuthLogin(req, res) {
   try {
     const { email, password } = req.body || {};
     const user = await User.findOne({ email: String(email || '').toLowerCase() });
@@ -386,7 +416,31 @@ app.post('/api/auth/login', async (req, res) => {
     await user.save();
     res.json({ token: signToken(user), user: publicUser(user) });
   } catch (e) { res.status(500).json({ error: e.message }); }
-});
+}
+
+app.post('/api/auth/login', handleAuthLogin);
+app.post('/api/login', handleAuthLogin);
+
+async function handleAuthSignup(req, res) {
+  try {
+    const { email, password, name, phone } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'email + password required' });
+    const exists = await User.findOne({ email: String(email).toLowerCase() });
+    if (exists) return res.status(409).json({ error: 'email already registered' });
+    const hash = await bcrypt.hash(String(password), 10);
+    const user = await User.create({
+      email: String(email).toLowerCase(),
+      password: hash,
+      name: name || '',
+      phone: phone || '',
+      lastLoginAt: new Date(),
+    });
+    res.json({ token: signToken(user), user: publicUser(user) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+
+app.post('/api/auth/signup', handleAuthSignup);
+app.post('/api/register', handleAuthSignup);
 
 app.post('/api/auth/oauth', async (req, res) => {
   try {
@@ -520,51 +574,53 @@ app.post('/api/listings', authRequired, async (req, res) => {
     const body = req.body || {};
     let images = [];
 
-    // 1) S3 URLs from a pre-signed upload
-    if (Array.isArray(body.images))         images = body.images.filter(Boolean);
+    if (Array.isArray(body.images)) images = body.images.filter(Boolean);
     else if (typeof body.images === 'string') images = tryParseJson(body.images, []) || [];
 
-    // 2) base64 fallback — convert to S3
-    if (Array.isArray(body.imagesBase64)) {
-      for (const b64 of body.imagesBase64) {
-        try { images.push(await uploadBase64ToS3(b64, req.user.id)); }
-        catch (err) { console.warn('[s3] base64 upload failed:', err.message); }
-      }
+    const inlineBase64 = Array.isArray(body.imagesBase64)
+      ? body.imagesBase64
+      : (Array.isArray(body.images) ? body.images.filter(i => typeof i === 'string' && i.startsWith('data:')) : []);
+    for (const b64 of inlineBase64) {
+      try { images.push(await uploadBase64ToS3(b64, req.user.id)); }
+      catch (err) { console.warn('[s3] base64 upload failed:', err.message); }
     }
 
-    // Everything else goes into "fields"
-    const known = new Set([
-      'type','category','title','description','price','currency','location',
-      'lat','lng','images','imagesBase64','features','status',
-    ]);
-    const extras = {};
-    for (const k of Object.keys(body)) if (!known.has(k)) extras[k] = body[k];
+    const base = wallsListingToDoc(body, req.user.id);
+    const doc = await Listing.create({ ...base, images });
 
-    const features = Array.isArray(body.features)
-      ? body.features
-      : tryParseJson(body.features, []) || [];
-
-    const doc = await Listing.create({
-      ownerId    : req.user.id,
-      type       : body.type,
-      category   : body.category,
-      title      : body.title,
-      description: body.description,
-      price      : toNumberPrice(body.price),
-      currency   : body.currency || 'USD',
-      location   : body.location,
-      lat        : body.lat ? Number(body.lat) : undefined,
-      lng        : body.lng ? Number(body.lng) : undefined,
-      images,
-      features,
-      fields     : extras,
-      status     : body.status || 'active',
-    });
-
-    // fire-and-forget: match saved searches & push
     matchAndNotify(doc).catch(e => console.error('[matcher]', e));
 
     res.json(publicListing(doc, req.user.id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Bulk sync used by walls.js offline cache reconciliation
+app.put('/api/listings/bulk', authRequired, async (req, res) => {
+  try {
+    const incoming = Array.isArray(req.body?.listings) ? req.body.listings : [];
+    let upserted = 0;
+    for (const raw of incoming) {
+      if (!raw || !raw.title) continue;
+      const id = raw.id || raw._id;
+      let doc = id ? await Listing.findById(id) : null;
+      let images = Array.isArray(raw.images) ? raw.images.filter(u => u && !String(u).startsWith('data:')) : [];
+      const b64s = (raw.images || []).filter(u => typeof u === 'string' && u.startsWith('data:'));
+      for (const b64 of b64s) {
+        try { images.push(await uploadBase64ToS3(b64, req.user.id)); } catch (_) {}
+      }
+      const base = wallsListingToDoc(raw, req.user.id);
+      if (doc) {
+        if (doc.ownerId.toString() !== req.user.id) continue;
+        Object.assign(doc, base, { images: images.length ? images : doc.images });
+        doc.updatedAt = new Date();
+        await doc.save();
+      } else {
+        doc = await Listing.create({ ...base, images });
+      }
+      upserted++;
+    }
+    const all = await Listing.find({ status: { $ne: 'hidden' } }).sort({ createdAt: -1 }).limit(500);
+    res.json({ ok: true, upserted, listings: all.map(d => publicListing(d, req.user.id)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -595,9 +651,12 @@ app.put('/api/listings/:id', authRequired, async (req, res) => {
     if ('price' in b) doc.price = toNumberPrice(b.price);
     if ('lat'   in b) doc.lat   = Number(b.lat);
     if ('lng'   in b) doc.lng   = Number(b.lng);
-    if (b.fields && typeof b.fields === 'object') {
-      doc.fields = { ...(doc.fields || {}), ...b.fields };
-    }
+    const mergedFields = { ...(doc.fields || {}) };
+    if (b.fields && typeof b.fields === 'object') Object.assign(mergedFields, b.fields);
+    ['categoryLabel', 'clientId', 'bedrooms', 'bathrooms', 'areaSqm', 'contact', 'bidEnabled'].forEach((k) => {
+      if (b[k] !== undefined) mergedFields[k] = b[k];
+    });
+    doc.fields = mergedFields;
     doc.updatedAt = new Date();
     await doc.save();
     res.json(publicListing(doc, req.user.id));
@@ -919,8 +978,12 @@ async function pushToUser(userId, payload) {
 // ---------------------------------------------------------------------------
 // SPA fallback (MUST be after all /api routes)
 // ---------------------------------------------------------------------------
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
+  const indexPath = path.join(FRONTEND_DIR, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) res.sendFile(path.join(__dirname, 'index.html'));
+  });
 });
 
 // ---------------------------------------------------------------------------

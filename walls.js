@@ -28,6 +28,39 @@ window.WW_API = window.WW_API || {
   HEALTH:          '/api/health'             // GET (warm-up)
 };
 
+// Storage resilient to Tracking Prevention / blocked localStorage (Edge, Safari ITP)
+window._wwMem = window._wwMem || {};
+window._wwStorage = {
+  get: function(key) {
+    try {
+      const v = localStorage.getItem(key);
+      if (v != null) return v;
+    } catch (_) {}
+    try {
+      const v = sessionStorage.getItem(key);
+      if (v != null) return v;
+    } catch (_) {}
+    return Object.prototype.hasOwnProperty.call(window._wwMem, key) ? window._wwMem[key] : null;
+  },
+  set: function(key, value) {
+    window._wwMem[key] = value;
+    try { localStorage.setItem(key, value); } catch (_) {}
+    try { sessionStorage.setItem(key, value); } catch (_) {}
+  },
+  remove: function(key) {
+    delete window._wwMem[key];
+    try { localStorage.removeItem(key); } catch (_) {}
+    try { sessionStorage.removeItem(key); } catch (_) {}
+  }
+};
+window._wwGetToken = function() {
+  return window._wwStorage.get('ww_token') || '';
+};
+window._wwSetToken = function(token) {
+  if (token) window._wwStorage.set('ww_token', token);
+  else window._wwStorage.remove('ww_token');
+};
+
 // Generic fetch wrapper with auth token + timeout
 window._wwApi = async function(path, opts) {
   opts = opts || {};
@@ -37,9 +70,13 @@ window._wwApi = async function(path, opts) {
     { 'Content-Type': 'application/json', 'Accept': 'application/json' },
     opts.headers || {}
   );
-  const tok = localStorage.getItem('ww_token');
-  // Allow opting out of the auth header so public reads return the global feed
-  // (prevents the backend from scoping listings to the current user).
+  const tok = window._wwGetToken();
+  const needsAuth = !opts.noAuth && (opts.method === 'POST' || opts.method === 'PUT' || opts.method === 'DELETE');
+  if (needsAuth && !tok) {
+    const err = new Error('Not logged in — sign in with email/password to sync listings.');
+    err.status = 401;
+    throw err;
+  }
   if (tok && !opts.noAuth) headers['Authorization'] = 'Bearer ' + tok;
 
   const ctrl = new AbortController();
@@ -81,7 +118,7 @@ window._wwWarmBackend = function() {
 window._wwWarmBackend();
 try {
   if (window.WW_API && window.WW_API.API_BASE) {
-    localStorage.setItem('ww_api_base', window.WW_API.API_BASE);
+    window._wwStorage.set('ww_api_base', window.WW_API.API_BASE);
   }
 } catch (_) {}
 
@@ -379,10 +416,30 @@ window.WW_APP = {
     if (row.childNodes.length) card.appendChild(row);
   },
 
+  _getCurrentUserId: function() {
+    const u = this.user || {};
+    return u.id || u._id || u.userId || null;
+  },
+
+  _hasServerAuth: function() {
+    return !!(window._wwGetToken() && this._getCurrentUserId() && !String(this._getCurrentUserId()).startsWith('user_'));
+  },
+
+  _listingBelongsToCurrentUser: function(listing) {
+    if (!listing || !this.user) return false;
+    const uid = this._getCurrentUserId();
+    const email = (this.user.email || '').toLowerCase();
+    if (listing.ownerId && uid && String(listing.ownerId) === String(uid)) return true;
+    if (listing.createdBy && email && String(listing.createdBy).toLowerCase() === email) return true;
+    if (listing.contact && listing.contact.email && email && String(listing.contact.email).toLowerCase() === email) return true;
+    return false;
+  },
+
   _prepareBackendListingPayload: function(listing) {
     const images = Array.isArray(listing.images) ? listing.images.slice() : [];
     const httpImages = images.filter(function(u) { return u && !String(u).startsWith('data:'); });
     const imagesBase64 = images.filter(function(u) { return u && String(u).startsWith('data:'); });
+    const uid = this._getCurrentUserId();
     return {
       type: listing.type || listing.category,
       category: listing.category,
@@ -398,6 +455,7 @@ window.WW_APP = {
       features: listing.features || [],
       status: listing.status || 'active',
       clientId: listing.clientId || listing.id,
+      ownerId: uid,
       bedrooms: listing.bedrooms,
       bathrooms: listing.bathrooms,
       areaSqm: listing.areaSqm,
@@ -847,9 +905,11 @@ window.WW_APP = {
   // Load user state from localStorage
   loadUserState: function() {
     try {
-      const userData = localStorage.getItem('ww_user');
+      const userData = window._wwStorage.get('ww_user');
       if (userData) {
         this.user = JSON.parse(userData);
+        const tok = window._wwGetToken();
+        if (tok && this.user && !this.user.authToken) this.user.authToken = tok;
         this.updateUserMenu();
       }
     } catch (e) {
@@ -977,7 +1037,7 @@ window.WW_APP = {
   loadListingsFromStorage: function() {
     // 1) Instant cache hydration
     try {
-      const cached = localStorage.getItem('ww_listings_v2');
+      const cached = window._wwStorage.get('ww_listings_v2');
       if (cached) {
         const arr = JSON.parse(cached);
         if (Array.isArray(arr)) {
@@ -1008,14 +1068,17 @@ window.WW_APP = {
         // still in flight), keep the cache and trigger a re-sync instead of
         // wiping the screen.
         if ((!arr || arr.length === 0) && self.listings && self.listings.length > 0) {
-          console.warn('Backend returned 0 listings — keeping local cache and re-syncing.');
-          try {
-            window._wwApi(cfg.LISTINGS_BULK || '/api/listings/bulk', {
-              method: 'PUT',
-              body: { listings: self.listings },
-              timeout: 60000
-            }).catch(function(err) { console.warn('Re-sync after empty fetch failed:', err && err.message); });
-          } catch (_) {}
+          console.warn('Backend returned 0 listings — keeping local cache.');
+          if (self._hasServerAuth()) {
+            const mine = self.listings.filter(function(l) { return self._listingBelongsToCurrentUser(l); });
+            if (mine.length) {
+              window._wwApi(cfg.LISTINGS_BULK || '/api/listings/bulk', {
+                method: 'PUT',
+                body: { listings: mine },
+                timeout: 60000
+              }).catch(function(err) { console.warn('Re-sync after empty fetch failed:', err && err.message); });
+            }
+          }
           return;
         }
         // Build a lookup of existing local images so freshly-uploaded data-URL
@@ -1038,7 +1101,7 @@ window.WW_APP = {
           return l;
         });
         self.sortListings();
-        try { localStorage.setItem('ww_listings_v2', JSON.stringify(self.listings)); } catch (_) {}
+        try { window._wwStorage.set('ww_listings_v2', JSON.stringify(self.listings)); } catch (_) {}
         try {
           const modalOpen = !!document.querySelector('.modal[aria-hidden="false"], .modal[style*="display: flex"]');
           const canRefreshBuyView = self.currentView === 'app' && self.currentMode === 'buy' && !self.currentCategory && !modalOpen;
@@ -1089,26 +1152,25 @@ window.WW_APP = {
   saveListingsToStorage: function() {
     try {
       this.sortListings();
-      localStorage.setItem('ww_listings_v2', JSON.stringify(this.listings));
+      window._wwStorage.set('ww_listings_v2', JSON.stringify(this.listings));
       this.updateAdminStats();
     } catch (e) {
       console.warn('Error caching listings:', e);
     }
-    // Debounced safety-net bulk sync to backend, so that mutations done via
-    // helpers that only call saveListingsToStorage (likes, approvals, edits,
-    // priority changes, etc.) still get persisted server-side. Individual
-    // create/update/delete flows still use the dedicated REST endpoints for
-    // immediate consistency; this is the catch-all.
     try {
       const self = this;
       const cfg = window.WW_API || {};
-      if (!cfg.API_BASE) return;
+      if (!cfg.API_BASE || !self._hasServerAuth()) return;
       if (self._bulkSyncTimer) clearTimeout(self._bulkSyncTimer);
       self._bulkSyncTimer = setTimeout(function() {
         try {
+          const mine = (self.listings || []).filter(function(l) {
+            return self._listingBelongsToCurrentUser(l);
+          });
+          if (!mine.length) return;
           window._wwApi(cfg.LISTINGS_BULK || '/api/listings/bulk', {
             method: 'PUT',
-            body: { listings: self.listings },
+            body: { listings: mine },
             timeout: 60000
           }).catch(function(err) {
             console.warn('Bulk listings sync failed:', err && err.message);
@@ -1125,6 +1187,12 @@ window.WW_APP = {
     const cfg = window.WW_API || {};
     if (!listing.clientId) listing.clientId = listing.id;
     if (!cfg.API_BASE) return Promise.resolve(Object.assign({}, listing, { _syncFailed: true }));
+    if (!this._hasServerAuth()) {
+      return Promise.resolve(Object.assign({}, listing, {
+        _syncFailed: true,
+        _syncError: 'Log in with your account (email/password) to sync listings to the server.'
+      }));
+    }
     const payload = this._prepareBackendListingPayload(listing);
     return window._wwApi(cfg.LISTINGS || '/api/listings', { method: 'POST', body: payload, timeout: 60000 })
       .then(res => {
@@ -5260,7 +5328,7 @@ HOW TO USE THE APP:
           if (verifPreview) verifPreview.innerHTML = '';
         }
         if (finalListing && finalListing._syncFailed) {
-          showToast('Listing saved on this device, but live sync failed: ' + (finalListing._syncError || 'backend unavailable'), 'error');
+          showToast('Saved on this device only — ' + (finalListing._syncError || 'sign in with email/password to sync.'), 'error');
         } else if (requiresVerification) {
           showToast('Listing submitted for verification. It will appear after admin approval.', 'success');
         } else {
@@ -5931,7 +5999,7 @@ HOW TO USE THE APP:
         if (r.ok) {
           const data = await r.json();
           serverUser = data.user || data;
-          if (data.token) localStorage.setItem('ww_token', data.token);
+          if (data.token) window._wwSetToken(data.token);
         }
       } catch (e) {
         console.warn('Social backend verify failed, falling back to local:', e);
@@ -5946,11 +6014,12 @@ HOW TO USE THE APP:
     let user = this.allUsers.find(u => (u.email || '').toLowerCase() === email.toLowerCase());
     if (!user) {
       user = {
-        id: (serverUser && serverUser.id) || 'user_' + Date.now(),
+        id: (serverUser && (serverUser.id || serverUser._id)) || 'user_' + Date.now(),
         name: name,
         email: email,
         phone: (serverUser && serverUser.phone) || '',
         password: '',
+        authToken: (serverUser && serverUser.token) || window._wwGetToken() || '',
         provider: provider,
         avatar: profile.picture && (profile.picture.data ? profile.picture.data.url : profile.picture) || '',
         isAdmin: !!(serverUser && serverUser.isAdmin),
@@ -5970,13 +6039,15 @@ HOW TO USE THE APP:
     if (user.isBlocked) { showToast('Your account has been blocked. Contact support.', 'error'); return; }
 
     user.isLoggedIn = true;
+    if (window._wwGetToken()) user.authToken = window._wwGetToken();
     this.user = user;
     this.saveUsers();
-    localStorage.setItem('ww_user', JSON.stringify(user));
+    window._wwStorage.set('ww_user', JSON.stringify(user));
     this.updateUserMenu();
     if (typeof closeLoginModal === 'function') closeLoginModal();
     if (typeof closeCreateAccountModal === 'function') closeCreateAccountModal();
     showToast('Signed in with ' + provider.charAt(0).toUpperCase() + provider.slice(1) + ', ' + (user.name || 'User') + '!', 'success');
+    try { this.loadListingsFromStorage(); } catch (_) {}
 
     // Social providers (Google) don't return a phone number. Collect it now
     // (with country code) so listings and contact info are complete.
@@ -5986,7 +6057,7 @@ HOW TO USE THE APP:
         if (phoneWithCode) {
           user.phone = phoneWithCode;
           self.saveUsers();
-          localStorage.setItem('ww_user', JSON.stringify(user));
+          window._wwStorage.set('ww_user', JSON.stringify(user));
           self.updateUserMenu();
         }
         if (self.currentMode === 'sell') self.showSellerView();
@@ -6076,7 +6147,7 @@ HOW TO USE THE APP:
           const data = await resp.json().catch(() => ({}));
           const serverUser = data.user || data;
           const user = {
-            id: serverUser.id || ('user_' + Date.now()),
+            id: serverUser.id || serverUser._id || ('user_' + Date.now()),
             name: serverUser.name || rawEmail.split('@')[0],
             email: serverUser.email || rawEmail,
             phone: serverUser.phone || '',
@@ -6093,11 +6164,12 @@ HOW TO USE THE APP:
             self.saveUsers();
           }
           self.user = user;
-          if (user.authToken) localStorage.setItem('ww_token', user.authToken);
-          localStorage.setItem('ww_user', JSON.stringify(user));
+          if (user.authToken) window._wwSetToken(user.authToken);
+          window._wwStorage.set('ww_user', JSON.stringify(user));
           self.updateUserMenu();
           closeLoginModal();
           showToast(`Welcome back, ${user.name}!`, 'success');
+          try { self.loadListingsFromStorage(); } catch (_) {}
           if (self.currentMode === 'sell') self.showSellerView();
           return;
         }
@@ -6125,10 +6197,10 @@ HOW TO USE THE APP:
 
     user.isLoggedIn = true;
     this.user = user;
-    localStorage.setItem('ww_user', JSON.stringify(user));
+    window._wwStorage.set('ww_user', JSON.stringify(user));
     this.updateUserMenu();
     closeLoginModal();
-    showToast(`Welcome back, ${user.name || 'User'}!`, 'success');
+    showToast('Signed in offline — log in with email/password on the server to sync listings.', 'info');
     if (this.currentMode === 'sell') this.showSellerView();
   },
 
@@ -6183,7 +6255,7 @@ HOW TO USE THE APP:
     }
 
     const newUser = {
-      id: (serverUser && serverUser.id) || ('user_' + Date.now()),
+      id: (serverUser && (serverUser.id || serverUser._id)) || ('user_' + Date.now()),
       name: (serverUser && serverUser.name) || name,
       email: (serverUser && serverUser.email) || email,
       phone: (serverUser && serverUser.phone) || phone,
@@ -6200,8 +6272,13 @@ HOW TO USE THE APP:
     this.allUsers.push(newUser);
     this.user = newUser;
     this.saveUsers();
-    if (newUser.authToken) localStorage.setItem('ww_token', newUser.authToken);
-    localStorage.setItem('ww_user', JSON.stringify(newUser));
+    if (newUser.authToken) window._wwSetToken(newUser.authToken);
+    window._wwStorage.set('ww_user', JSON.stringify(newUser));
+    if (newUser.authToken) {
+      try { this.loadListingsFromStorage(); } catch (_) {}
+    } else {
+      showToast('Account saved locally — use server signup/login to enable live sync.', 'info');
+    }
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalLabel; }
     this.updateUserMenu();
     closeCreateAccountModal();
@@ -6566,7 +6643,8 @@ HOW TO USE THE APP:
   
   logout: function() {
     this.user = null;
-    localStorage.removeItem('ww_user');
+    window._wwStorage.remove('ww_user');
+    window._wwSetToken('');
     this.updateUserMenu();
     showToast('Logged out successfully', 'info');
     this.switchToMode('buy');

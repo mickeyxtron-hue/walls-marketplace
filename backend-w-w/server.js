@@ -234,6 +234,11 @@ function signToken(user) {
   );
 }
 
+function authUserId(req) {
+  const u = req.user || {};
+  return u.id || u.userId || u._id || u.sub || null;
+}
+
 function authRequired(req, res, next) {
   const h = req.headers.authorization || '';
   const bearer = h.startsWith('Bearer ') ? h.slice(7) : null;
@@ -241,6 +246,9 @@ function authRequired(req, res, next) {
   if (!token) return res.status(401).json({ error: 'unauthenticated' });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
+    if (!authUserId(req)) {
+      return res.status(401).json({ error: 'invalid token payload' });
+    }
     next();
   } catch {
     res.status(401).json({ error: 'invalid token' });
@@ -572,6 +580,12 @@ app.get('/api/listings/:id', authOptional, async (req, res) => {
 app.post('/api/listings', authRequired, async (req, res) => {
   try {
     const body = req.body || {};
+    let ownerId = authUserId(req);
+    if (!ownerId && body.ownerId && mongoose.Types.ObjectId.isValid(String(body.ownerId))) {
+      ownerId = String(body.ownerId);
+    }
+    if (!ownerId) return res.status(401).json({ error: 'unauthenticated' });
+
     let images = [];
 
     if (Array.isArray(body.images)) images = body.images.filter(Boolean);
@@ -581,36 +595,41 @@ app.post('/api/listings', authRequired, async (req, res) => {
       ? body.imagesBase64
       : (Array.isArray(body.images) ? body.images.filter(i => typeof i === 'string' && i.startsWith('data:')) : []);
     for (const b64 of inlineBase64) {
-      try { images.push(await uploadBase64ToS3(b64, req.user.id)); }
+      try { images.push(await uploadBase64ToS3(b64, ownerId)); }
       catch (err) { console.warn('[s3] base64 upload failed:', err.message); }
     }
 
-    const base = wallsListingToDoc(body, req.user.id);
+    const base = wallsListingToDoc(body, ownerId);
     const doc = await Listing.create({ ...base, images });
 
     matchAndNotify(doc).catch(e => console.error('[matcher]', e));
 
-    res.json(publicListing(doc, req.user.id));
+    res.json(publicListing(doc, ownerId));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Bulk sync used by walls.js offline cache reconciliation
 app.put('/api/listings/bulk', authRequired, async (req, res) => {
   try {
+    const ownerId = authUserId(req);
+    if (!ownerId) return res.status(401).json({ error: 'unauthenticated' });
+
     const incoming = Array.isArray(req.body?.listings) ? req.body.listings : [];
     let upserted = 0;
     for (const raw of incoming) {
       if (!raw || !raw.title) continue;
       const id = raw.id || raw._id;
+      if (id && !mongoose.Types.ObjectId.isValid(String(id))) continue;
+
       let doc = id ? await Listing.findById(id) : null;
       let images = Array.isArray(raw.images) ? raw.images.filter(u => u && !String(u).startsWith('data:')) : [];
       const b64s = (raw.images || []).filter(u => typeof u === 'string' && u.startsWith('data:'));
       for (const b64 of b64s) {
-        try { images.push(await uploadBase64ToS3(b64, req.user.id)); } catch (_) {}
+        try { images.push(await uploadBase64ToS3(b64, ownerId)); } catch (_) {}
       }
-      const base = wallsListingToDoc(raw, req.user.id);
+      const base = wallsListingToDoc(raw, ownerId);
       if (doc) {
-        if (doc.ownerId.toString() !== req.user.id) continue;
+        if (doc.ownerId && doc.ownerId.toString() !== String(ownerId)) continue;
         Object.assign(doc, base, { images: images.length ? images : doc.images });
         doc.updatedAt = new Date();
         await doc.save();
@@ -620,7 +639,7 @@ app.put('/api/listings/bulk', authRequired, async (req, res) => {
       upserted++;
     }
     const all = await Listing.find({ status: { $ne: 'hidden' } }).sort({ createdAt: -1 }).limit(500);
-    res.json({ ok: true, upserted, listings: all.map(d => publicListing(d, req.user.id)) });
+    res.json({ ok: true, upserted, listings: all.map(d => publicListing(d, ownerId)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -385,7 +385,9 @@ window.WW_APP = {
       this.updateUI();
       this.showAllListings(); // initial view: all listings (landing hidden)
       this.showInstallPromptIfAvailable();
-      this.createAdminView(); // creates the admin panel UI and inserts it into <main>
+      const runAdmin = () => { try { this.createAdminView(); } catch (e) { console.warn('Admin view deferred:', e); } };
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(runAdmin, { timeout: 2000 });
+      else setTimeout(runAdmin, 100);
       this.updateNavHighlight();
       this.startBidTimerLoop();
       this.injectMenuButton(); // add hamburger menu before logo
@@ -911,9 +913,10 @@ window.WW_APP = {
     // Ask for a generous page so newly-created listings are not hidden by
     // the default 20-item limit.
     const url = (cfg.LISTINGS || '/api/listings') + '?limit=200&sortBy=createdAt&sortOrder=desc';
-    window._wwApi(url, { method: 'GET', timeout: 45000, noAuth: true })
+    const requestId = (self._lastListingsFetchId = (self._lastListingsFetchId || 0) + 1);
+    window._wwApi(url, { method: 'GET', timeout: 15000, noAuth: true })
       .then(function(data) {
-        if (self._lastListingsFetchId && requestId !== self._lastListingsFetchId) return;
+        if (requestId !== self._lastListingsFetchId) return;
         const arr = Array.isArray(data) ? data : (data && data.listings) || [];
         // Guard: if the backend returns an empty list but we have cached
         // listings locally (e.g. user just created one and the bulk sync is
@@ -3628,7 +3631,7 @@ HOW TO USE THE APP:
     if (noListings) noListings.style.display = 'none';
     if (loadMoreContainer) loadMoreContainer.style.display = 'none';
     
-    setTimeout(() => {
+    const paint = () => {
       if (loadingState) loadingState.style.display = 'none';
       
       if (visibleListings.length === 0) {
@@ -3694,6 +3697,8 @@ HOW TO USE THE APP:
           listingsGrid.appendChild(categorySection);
         });
         
+        try { if (window.wwInitLucide) window.wwInitLucide(); } catch (_) {}
+
         if (Object.keys(categories).length === 0) {
           const allSection = document.createElement('div');
           allSection.className = 'category-section-horizontal';
@@ -3719,7 +3724,9 @@ HOW TO USE THE APP:
           listingsGrid.appendChild(allSection);
         }
       }
-    }, 100);
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(paint);
+    else paint();
   },
   
   getCategoryIcon: function(categoryName) {
@@ -6827,17 +6834,52 @@ HOW TO USE THE APP:
 
   // ---- Theme picker ----
   themes: {
-    beige: { '--primary': '#C8B897', '--primary-dark': '#A89B7A', '--bg': '#fafafa', '--text': '#333333' },
-    navy:  { '--primary': '#C8A84E', '--primary-dark': '#B58E30', '--bg': '#F8F9FA', '--text': '#2C3E50', '--brand': '#0F1A2A' },
-    copper:{ '--primary': '#B87333', '--primary-dark': '#8a5524', '--bg': '#FDFBF7', '--text': '#2B2B2B', '--brand': '#2B2B2B' }
+    beige: {
+      '--primary': '#C8B897', '--primary-dark': '#A89B7A',
+      '--primary-soft': 'rgba(200,184,151,0.16)',
+      '--bg': '#FAF8F3', '--surface': '#FFFFFF', '--surface-2': '#F4F1EA',
+      '--card': '#FFFFFF', '--text': '#1F1B16', '--text-muted': '#6E6658',
+      '--border-color': '#E8E2D5',
+      '--nav-bg': '#FFFFFF', '--nav-active-bg': '#C8B897', '--nav-active-fg': '#1F1B16',
+      '--nav-inactive-fg': '#6E6658'
+    },
+    navy: {
+      '--primary': '#C8A84E', '--primary-dark': '#B58E30',
+      '--primary-soft': 'rgba(200,168,78,0.16)',
+      '--bg': '#0B1220', '--surface': '#121C2E', '--surface-2': '#1A2438',
+      '--card': '#152033', '--text': '#F1F4FA', '--text-muted': '#9AA6BD',
+      '--border-color': 'rgba(255,255,255,0.08)',
+      '--brand': '#C8A84E',
+      '--nav-bg': '#152033', '--nav-active-bg': '#C8A84E', '--nav-active-fg': '#0B1220',
+      '--nav-inactive-fg': '#9AA6BD'
+    },
+    copper: {
+      '--primary': '#B87333', '--primary-dark': '#8a5524',
+      '--primary-soft': 'rgba(184,115,51,0.16)',
+      '--bg': '#171311', '--surface': '#211B17', '--surface-2': '#2A221C',
+      '--card': '#241D18', '--text': '#F3EBE2', '--text-muted': '#B8A99A',
+      '--border-color': 'rgba(255,255,255,0.08)',
+      '--brand': '#B87333',
+      '--nav-bg': '#241D18', '--nav-active-bg': '#B87333', '--nav-active-fg': '#FFFFFF',
+      '--nav-inactive-fg': '#B8A99A'
+    }
   },
   applyTheme: function(name) {
     const t = this.themes[name] || this.themes.beige;
     const root = document.documentElement;
+    // Clear any previous theme overrides first so switching is clean
+    const allKeys = new Set();
+    Object.values(this.themes).forEach(th => Object.keys(th).forEach(k => allKeys.add(k)));
+    allKeys.forEach(k => root.style.removeProperty(k));
     Object.keys(t).forEach(k => root.style.setProperty(k, t[k]));
+    root.setAttribute('data-theme', name);
     try { localStorage.setItem('ww_theme', name); } catch (_) {}
     const tmeta = document.querySelector('meta[name="theme-color"]');
     if (tmeta) tmeta.setAttribute('content', t['--primary']);
+    root.classList.add('theme-animate');
+    clearTimeout(this._themeAnimTimer);
+    this._themeAnimTimer = setTimeout(() => root.classList.remove('theme-animate'), 320);
+    try { window.dispatchEvent(new CustomEvent('ww:themechange', { detail: { name } })); } catch (_) {}
   },
   showThemePicker: function() {
     const self = this;
@@ -6846,17 +6888,17 @@ HOW TO USE THE APP:
     modal.className = 'modal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:10001;padding:16px;';
     modal.innerHTML = `
-      <div style="background:#fff;border-radius:14px;padding:22px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+      <div style="background:var(--card,#fff);color:var(--text,#222);border:1px solid var(--border-color,#eee);border-radius:14px;padding:22px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
           <h3 style="margin:0;font-size:18px;">Choose a theme</h3>
-          <button data-x style="background:none;border:none;font-size:22px;cursor:pointer;color:#888;">&times;</button>
+          <button data-x style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted,#888);">&times;</button>
         </div>
         ${[
-          { k:'beige',  label:'Warm Beige (current)',          swatches:['#C8B897','#A89B7A','#fafafa','#333333'] },
+          { k:'beige',  label:'Warm Beige',                    swatches:['#C8B897','#A89B7A','#fafafa','#333333'] },
           { k:'navy',   label:'Deep Navy + Gold',              swatches:['#0F1A2A','#1A2A3A','#C8A84E','#F8F9FA'] },
           { k:'copper', label:'Charcoal + Copper / Rose Gold', swatches:['#2B2B2B','#B87333','#D4A373','#FDFBF7'] }
         ].map(t => `
-          <button data-t="${t.k}" style="display:flex;align-items:center;gap:14px;width:100%;padding:12px;margin-bottom:10px;border:2px solid ${cur===t.k?'#C8A84E':'#eee'};border-radius:12px;background:#fff;cursor:pointer;text-align:left;">
+          <button data-t="${t.k}" style="display:flex;align-items:center;gap:14px;width:100%;padding:12px;margin-bottom:10px;border:2px solid ${cur===t.k?'var(--primary,#C8A84E)':'var(--border-color,#eee)'};border-radius:12px;background:var(--surface,#fff);color:var(--text,#222);cursor:pointer;text-align:left;">
             <div style="display:flex;gap:4px;">
               ${t.swatches.map(s => `<span style="width:22px;height:22px;border-radius:6px;background:${s};display:inline-block;border:1px solid rgba(0,0,0,.06);"></span>`).join('')}
             </div>
@@ -6895,16 +6937,26 @@ HOW TO USE THE APP:
   },
 
   _installThemeButton: function() {
-    if (document.getElementById('wwThemeBtn')) return;
-    const host = document.querySelector('.header-left-group') || document.querySelector('.nav-container') || document.body;
-    const btn = document.createElement('button');
-    btn.id = 'wwThemeBtn';
-    btn.title = 'Theme';
-    btn.setAttribute('aria-label', 'Choose theme');
-    btn.innerHTML = '<i class="fas fa-palette"></i>';
-    btn.style.cssText = 'background:none;border:1px solid #e0e0e0;border-radius:8px;padding:8px 10px;cursor:pointer;font-size:16px;color:var(--primary-dark,#A89B7A);margin-left:8px;';
-    btn.addEventListener('click', () => this.showThemePicker());
-    host.appendChild(btn);
+    const btn = document.getElementById('wwThemeBtn');
+    if (btn && !btn._wwBound) {
+      btn._wwBound = true;
+      btn.addEventListener('click', () => this.showThemePicker());
+      return;
+    }
+    if (btn) return;
+    const host = document.querySelector('.header-actions') || document.querySelector('.nav-container');
+    if (!host) return;
+    const el = document.createElement('button');
+    el.id = 'wwThemeBtn';
+    el.type = 'button';
+    el.className = 'header-icon-btn theme-toggle-btn';
+    el.title = 'Theme';
+    el.setAttribute('aria-label', 'Choose theme');
+    el.innerHTML = '<i class="fas fa-palette" aria-hidden="true"></i><span>Theme</span>';
+    el.addEventListener('click', () => this.showThemePicker());
+    const profileWrap = host.querySelector('.profile-wrap');
+    if (profileWrap) host.insertBefore(el, profileWrap);
+    else host.appendChild(el);
   },
 
   _installCustomInstallButton: function() {

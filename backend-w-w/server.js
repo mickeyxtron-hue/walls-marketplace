@@ -150,6 +150,7 @@ const UserSchema = new mongoose.Schema({
   avatar     : { type: String, default: '' },
   provider   : { type: String, default: 'local' },
   language   : { type: String, default: 'en' },
+  isAdmin    : { type: Boolean, default: false },
   lastLoginAt: { type: Date },
   createdAt  : { type: Date, default: Date.now },
 }, { versionKey: false });
@@ -288,7 +289,14 @@ function publicUser(u) {
     avatar  : o.avatar || '',
     provider: o.provider || 'local',
     language: o.language || 'en',
+    isAdmin : !!o.isAdmin,
   };
+}
+
+async function userIsAdmin(userId) {
+  if (!userId) return false;
+  const u = await User.findById(userId).lean();
+  return !!(u && u.isAdmin);
 }
 
 function publicListing(doc, viewerId) {
@@ -316,6 +324,11 @@ function publicListing(doc, viewerId) {
     areaSqm    : fields.areaSqm ?? o.areaSqm ?? '',
     contact    : fields.contact || o.contact || {},
     bidEnabled : fields.bidEnabled ?? o.bidEnabled ?? false,
+    bidEndTime : fields.bidEndTime ?? o.bidEndTime ?? null,
+    isAd       : !!(fields.isAd ?? o.isAd),
+    adminPriority: Number(fields.adminPriority ?? o.adminPriority ?? 0) || 0,
+    verificationStatus: fields.verificationStatus ?? o.verificationStatus ?? null,
+    createdBy  : fields.createdBy ?? o.createdBy ?? '',
     bids       : (o.bids || []).map(b => ({
       userId   : b.userId?.toString?.(),
       amount   : b.amount,
@@ -647,7 +660,11 @@ app.put('/api/listings/:id', authRequired, async (req, res) => {
   try {
     const doc = await Listing.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'not found' });
-    if (doc.ownerId.toString() !== req.user.id) return res.status(403).json({ error: 'forbidden' });
+    const uid = authUserId(req);
+    if (!uid) return res.status(401).json({ error: 'unauthenticated' });
+    if (doc.ownerId && doc.ownerId.toString() !== String(uid) && !(await userIsAdmin(uid))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     const b = req.body || {};
 
@@ -662,7 +679,7 @@ app.put('/api/listings/:id', authRequired, async (req, res) => {
     // additional base64 uploads on edit
     if (Array.isArray(b.imagesBase64) && b.imagesBase64.length) {
       for (const b64 of b.imagesBase64) {
-        try { doc.images.push(await uploadBase64ToS3(b64, req.user.id)); }
+        try { doc.images.push(await uploadBase64ToS3(b64, uid)); }
         catch (err) { console.warn('[s3] base64 upload failed:', err.message); }
       }
     }
@@ -678,7 +695,7 @@ app.put('/api/listings/:id', authRequired, async (req, res) => {
     doc.fields = mergedFields;
     doc.updatedAt = new Date();
     await doc.save();
-    res.json(publicListing(doc, req.user.id));
+    res.json(publicListing(doc, uid));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -686,7 +703,11 @@ app.delete('/api/listings/:id', authRequired, async (req, res) => {
   try {
     const doc = await Listing.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'not found' });
-    if (doc.ownerId.toString() !== req.user.id) return res.status(403).json({ error: 'forbidden' });
+    const uid = authUserId(req);
+    if (!uid) return res.status(401).json({ error: 'unauthenticated' });
+    if (doc.ownerId && doc.ownerId.toString() !== String(uid) && !(await userIsAdmin(uid))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     // Best-effort delete of S3 images
     if (S3_BUCKET) {
@@ -707,21 +728,95 @@ app.delete('/api/listings/:id', authRequired, async (req, res) => {
 // ---------------------------------------------------------------------------
 app.post('/api/listings/:id/like', authRequired, async (req, res) => {
   try {
-    const uid = req.user.id;
+    const uid = authUserId(req);
+    if (!uid) return res.status(401).json({ error: 'unauthenticated' });
+    if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) {
+      return res.status(400).json({ error: 'invalid listing id' });
+    }
     const doc = await Listing.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'not found' });
-    const idx = (doc.likedBy || []).findIndex(x => x.toString() === uid);
+    const idx = (doc.likedBy || []).findIndex(x => x.toString() === String(uid));
     if (idx >= 0) doc.likedBy.splice(idx, 1);
-    else          doc.likedBy.push(uid);
+    else doc.likedBy.push(uid);
     await doc.save();
-    res.json({ liked: idx < 0, likeCount: doc.likedBy.length });
+    res.json({ liked: idx < 0, likeCount: doc.likedBy.length, listingId: doc._id.toString() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/me/likes', authRequired, async (req, res) => {
   try {
-    const docs = await Listing.find({ likedBy: req.user.id }).sort({ createdAt: -1 });
-    res.json(docs.map(d => publicListing(d, req.user.id)));
+    const uid = authUserId(req);
+    if (!uid) return res.status(401).json({ error: 'unauthenticated' });
+    const docs = await Listing.find({ likedBy: uid }).select('_id').lean();
+    res.json({ likes: docs.map(d => d._id.toString()) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Google OAuth verify shim (frontend expects this route)
+app.post('/api/auth/google/verify', async (req, res) => {
+  try {
+    const { profile, token, email, name, avatar } = req.body || {};
+    const userEmail = (profile && profile.email) || email;
+    if (!userEmail) return res.status(400).json({ error: 'email required' });
+    let user = await User.findOne({ email: String(userEmail).toLowerCase() });
+    if (!user) {
+      user = await User.create({
+        email: String(userEmail).toLowerCase(),
+        name: (profile && profile.name) || name || '',
+        avatar: (profile && profile.picture) || avatar || '',
+        provider: 'google',
+      });
+    }
+    user.lastLoginAt = new Date();
+    await user.save();
+    res.json({ token: signToken(user), user: publicUser(user) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: update any listing (persists to MongoDB for all devices)
+app.put('/api/admin/listings/:id', authRequired, async (req, res) => {
+  try {
+    const uid = authUserId(req);
+    if (!uid || !(await userIsAdmin(uid))) return res.status(403).json({ error: 'admin only' });
+    if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) {
+      return res.status(400).json({ error: 'invalid listing id' });
+    }
+    const doc = await Listing.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'not found' });
+
+    const b = req.body || {};
+    const updatable = ['type', 'category', 'title', 'description', 'currency', 'location', 'features', 'status'];
+    for (const k of updatable) if (k in b) doc[k] = b[k];
+    if ('images' in b) doc.images = Array.isArray(b.images) ? b.images : (tryParseJson(b.images, []) || []);
+    if ('price' in b) doc.price = toNumberPrice(b.price);
+    const mergedFields = { ...(doc.fields || {}) };
+    ['categoryLabel', 'clientId', 'bedrooms', 'bathrooms', 'areaSqm', 'contact', 'bidEnabled',
+      'isAd', 'adminPriority', 'verificationStatus', 'bidEnabled', 'bidEndTime', 'occupancyStatus', 'createdBy'
+    ].forEach((k) => { if (b[k] !== undefined) mergedFields[k] = b[k]; });
+    if (b.fields && typeof b.fields === 'object') Object.assign(mergedFields, b.fields);
+    doc.fields = mergedFields;
+    if (b.isAd !== undefined) mergedFields.isAd = !!b.isAd;
+    if (b.adminPriority !== undefined) mergedFields.adminPriority = Number(b.adminPriority) || 0;
+    doc.updatedAt = new Date();
+    await doc.save();
+    res.json(publicListing(doc, uid));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/admin/listings/:id', authRequired, async (req, res) => {
+  try {
+    const uid = authUserId(req);
+    if (!uid || !(await userIsAdmin(uid))) return res.status(403).json({ error: 'admin only' });
+    const doc = await Listing.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'not found' });
+    if (S3_BUCKET) {
+      for (const url of (doc.images || [])) {
+        const key = s3KeyFromUrl(url);
+        if (key) try { await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key })); } catch (_) {}
+      }
+    }
+    await doc.deleteOne();
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

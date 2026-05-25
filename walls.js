@@ -307,6 +307,8 @@ window.WW_APP = {
   savedSearches: [],
   
   // Helper to get default walls categories (NO SCHOOLS, includes services, new categories)
+  _removedCategoryKeys: ['sellingHouses', 'sellingFlats', 'cottagesToSale', 'residentialStands'],
+
   _getDefaultWallsCategories: function() {
     return [
       { key: 'rentalsHouses', label: 'Full Houses to Rent', icon: 'fas fa-house-user', type: 'rental' },
@@ -315,10 +317,6 @@ window.WW_APP = {
       { key: 'singleRoomsToRent', label: 'Single Rooms to Rent', icon: 'fas fa-door-closed', type: 'rental' },
       { key: 'cottagesToRent', label: 'Cottages to Rent', icon: 'fas fa-home', type: 'rental' },
       { key: 'bnb', label: 'BNB', icon: 'fas fa-bed', type: 'rental' },
-      { key: 'sellingHouses', label: 'Full Houses for Sale', icon: 'fas fa-home', type: 'sale' },
-      { key: 'sellingFlats', label: 'Sell Flats', icon: 'fas fa-building', type: 'sale' },
-      { key: 'cottagesToSale', label: 'Cottages to Sale', icon: 'fas fa-home', type: 'sale' },
-      { key: 'residentialStands', label: 'Residential Stands', icon: 'fas fa-map-marker-alt', type: 'sale' },
       { key: 'farmPlots', label: 'Farm Plots', icon: 'fas fa-seedling', type: 'sale' },
       { key: 'boardingHouses', label: 'Boarding Houses', icon: 'fas fa-school', type: 'rental' },
       // Service categories
@@ -331,7 +329,173 @@ window.WW_APP = {
   
   // Helper to identify categories that require ownership verification
   _getSaleCategoriesRequiringVerification: function() {
-    return ['sellingHouses', 'sellingFlats', 'cottagesToSale', 'residentialStands', 'farmPlots'];
+    return ['farmPlots'];
+  },
+
+  _getPropertyFormCategories: function() {
+    return ['rentalsHouses', 'rentalsFlats', 'rentalsRooms', 'singleRoomsToRent', 'cottagesToRent', 'bnb', 'boardingHouses', 'farmPlots'];
+  },
+
+  _isMongoId: function(id) {
+    return typeof id === 'string' && /^[a-f0-9]{24}$/i.test(id);
+  },
+
+  _likeHeartHtml: function(liked, likeCount) {
+    const color = liked ? '#E53935' : 'var(--text-muted, #888)';
+    const iconClass = liked ? 'fas' : 'far';
+    let html = '<i class="' + iconClass + ' fa-heart" style="color:' + color + ';"></i>';
+    if (likeCount > 0) {
+      html += '<div class="like-count-badge">' + likeCount + '</div>';
+    }
+    return html;
+  },
+
+  _updateLikeButtonUI: function(listingId) {
+    const entry = this.likes[listingId];
+    const likeCount = this._getLikeCount(listingId);
+    const liked = this._hasLiked(listingId);
+    $$(`.listing-card[data-id="${listingId}"] .like-button`).forEach(function(btn) {
+      btn.innerHTML = window.WW_APP._likeHeartHtml(liked, likeCount);
+    });
+  },
+
+  _mergeListingIntoCache: function(listing) {
+    const n = this._normalizeListing(Object.assign({}, listing));
+    const idx = this.listings.findIndex(l => l.id === n.id || (n.clientId && l.clientId === n.clientId));
+    if (idx >= 0) this.listings[idx] = Object.assign({}, this.listings[idx], n);
+    else this.listings.unshift(n);
+    this.sortListings();
+    window._wwStorage.set('ww_listings_v2', JSON.stringify(this.listings));
+    if (this.currentView === 'app' && this.currentMode === 'buy') {
+      if (this.currentCategory) {
+        const key = this.currentCategory.key;
+        const filtered = this.listings.filter(l => l.category === key || l.categoryLabel === this.currentCategory.label);
+        this.showFilteredListings(filtered, this.currentCategory.label, true);
+      } else {
+        this.showAllListings();
+      }
+    }
+  },
+
+  _persistListingToServer: function(listing) {
+    const self = this;
+    if (!listing) return Promise.resolve(listing);
+    if (this.user && this.user.isAdmin && this._isMongoId(listing.id)) {
+      return this.adminUpdateListingOnBackend(listing).then(function(saved) {
+        if (saved) self._mergeListingIntoCache(saved);
+        return saved || listing;
+      });
+    }
+    if (this._hasServerAuth() && this._isMongoId(listing.id)) {
+      return this.updateListingOnBackend(listing).then(function(saved) {
+        if (saved) self._mergeListingIntoCache(saved);
+        return saved || listing;
+      });
+    }
+    this.saveListingsToStorage();
+    return Promise.resolve(listing);
+  },
+
+  adminUpdateListingOnBackend: function(listing) {
+    const cfg = window.WW_API || {};
+    if (!cfg.API_BASE || !listing || !this._isMongoId(listing.id)) return Promise.resolve(listing);
+    const payload = this._prepareBackendListingPayload(listing);
+    payload.isAd = !!listing.isAd;
+    payload.adminPriority = listing.adminPriority || 0;
+    payload.verificationStatus = listing.verificationStatus;
+    payload.bidEnabled = !!listing.bidEnabled;
+    payload.bids = listing.bids || [];
+    payload.bidEndTime = listing.bidEndTime;
+    payload.occupancyStatus = listing.occupancyStatus;
+    payload.status = listing.status || 'active';
+    return window._wwApi('/api/admin/listings/' + encodeURIComponent(listing.id), {
+      method: 'PUT', body: payload, timeout: 60000
+    }).then(res => {
+      const saved = res && (res.listing || res);
+      return this._normalizeListing(Object.assign({}, listing, saved || {}));
+    }).catch(err => {
+      console.warn('Admin listing update failed:', err && err.message);
+      showToast('Server update failed: ' + (err && err.message), 'error');
+      return listing;
+    });
+  },
+
+  _buildCategoryPickerModal: function(options) {
+    options = options || {};
+    const self = this;
+    const mode = options.mode || 'buy';
+    const titleText = options.title || (mode === 'sell' ? 'Select category to list' : 'Choose a category');
+    const categories = (this.categories.walls || []).filter(c => !(this._removedCategoryKeys || []).includes(c.key));
+
+    const existing = document.querySelector('.category-picker-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.className = 'modal category-picker-modal';
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.display = 'flex';
+
+    const panel = document.createElement('div');
+    panel.className = 'category-picker-panel';
+
+    const header = document.createElement('div');
+    header.className = 'category-picker-header';
+    const title = document.createElement('h3');
+    title.textContent = titleText;
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'category-picker-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '<i class="fas fa-times"></i>';
+    closeBtn.addEventListener('click', () => modal.remove());
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    const body = document.createElement('div');
+    body.className = 'category-picker-body';
+
+    if (options.showAllButton !== false && mode === 'buy') {
+      const allBtn = document.createElement('button');
+      allBtn.type = 'button';
+      allBtn.className = 'btn btn-primary btn-block category-picker-all';
+      allBtn.innerHTML = '<i class="fas fa-globe"></i> All Available Listings';
+      allBtn.addEventListener('click', () => {
+        modal.remove();
+        self.showAllListings();
+      });
+      body.appendChild(allBtn);
+    }
+
+    const grid = document.createElement('div');
+    grid.className = 'category-grid-popup';
+
+    categories.forEach(function(cat) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'category-item-btn';
+      btn.innerHTML = '<div class="category-item-icon"><i class="' + cat.icon + '" aria-hidden="true"></i></div><span class="category-item-label">' + cat.label + '</span>';
+      btn.addEventListener('click', function() {
+        modal.remove();
+        if (mode === 'sell') {
+          self.currentCategory = cat;
+          self.renderSellerForm('walls');
+        } else {
+          self.selectCategory(cat.key);
+        }
+      });
+      grid.appendChild(btn);
+    });
+
+    body.appendChild(grid);
+    panel.appendChild(header);
+    panel.appendChild(body);
+    modal.appendChild(panel);
+    document.body.appendChild(modal);
+
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) modal.remove();
+    });
+    return modal;
   },
   
   // Helper to identify rental categories that can have occupancy status
@@ -520,7 +684,7 @@ window.WW_APP = {
         if (this._listingsPollTimer) clearInterval(this._listingsPollTimer);
         this._listingsPollTimer = setInterval(function() {
           try { _self.loadListingsFromStorage(); } catch (_) {}
-        }, 12000);
+        }, 8000);
         window.addEventListener('focus', function() { try { _self.loadListingsFromStorage(); } catch (_) {} });
         document.addEventListener('visibilitychange', function() {
           if (!document.hidden) { try { _self.loadListingsFromStorage(); } catch (_) {} }
@@ -858,7 +1022,7 @@ window.WW_APP = {
     }
     if (search.occupancyStatus === 'vacant' && listing.occupancyStatus !== 'vacant') return false;
     if (search.type && search.type !== 'All types') {
-      const saleCats = ['sellingHouses','sellingFlats','cottagesToSale','residentialStands','farmPlots'];
+      const saleCats = ['farmPlots'];
       const rentCats = ['rentalsHouses','rentalsFlats','rentalsRooms','singleRoomsToRent','cottagesToRent','bnb','boardingHouses'];
       const serviceCats = ['househelp','construction','boreholeServices','indriveDriver'];
       if (search.type === 'For Sale' && !saleCats.includes(listing.category)) return false;
@@ -887,6 +1051,8 @@ window.WW_APP = {
         wallsCategories = merged;
       }
       
+      const removed = this._removedCategoryKeys || [];
+      wallsCategories = wallsCategories.filter(c => !removed.includes(c.key));
       this.categories = { walls: wallsCategories };
     } catch (e) {
       console.warn('Error loading categories:', e);
@@ -958,7 +1124,7 @@ window.WW_APP = {
   // Migrates old shape: { [listingId]: number }
   loadLikes: function() {
     try {
-      const likesData = localStorage.getItem('ww_likes');
+      const likesData = window._wwStorage.get('ww_likes');
       if (likesData) {
         const parsed = JSON.parse(likesData);
         const migrated = {};
@@ -977,7 +1143,7 @@ window.WW_APP = {
 
   saveLikes: function() {
     try {
-      localStorage.setItem('ww_likes', JSON.stringify(this.likes));
+      window._wwStorage.set('ww_likes', JSON.stringify(this.likes));
     } catch (e) {
       console.warn('Error saving likes:', e);
     }
@@ -992,6 +1158,8 @@ window.WW_APP = {
   },
 
   _getLikeCount: function(listingId) {
+    const listing = (this.listings || []).find(l => l.id === listingId);
+    if (listing && listing.likeCount != null) return Number(listing.likeCount) || 0;
     const e = this.likes[listingId];
     if (!e) return 0;
     return typeof e === 'number' ? e : (e.count || 0);
@@ -1008,6 +1176,12 @@ window.WW_APP = {
     if (!l) return l;
     if (l._id && !l.id) l.id = l._id;
     if (l.fields && typeof l.fields === 'object') {
+      if (l.fields.isAd != null) l.isAd = !!l.fields.isAd;
+      if (l.fields.adminPriority != null) l.adminPriority = Number(l.fields.adminPriority) || 0;
+      if (l.fields.verificationStatus != null) l.verificationStatus = l.fields.verificationStatus;
+      if (l.fields.bidEnabled != null) l.bidEnabled = !!l.fields.bidEnabled;
+      if (l.fields.bidEndTime != null) l.bidEndTime = l.fields.bidEndTime;
+      if (l.fields.createdBy) l.createdBy = l.fields.createdBy;
       if (l.fields.bedrooms != null && l.bedrooms == null) l.bedrooms = l.fields.bedrooms;
       if (l.fields.bathrooms != null && l.bathrooms == null) l.bathrooms = l.fields.bathrooms;
       if (l.fields.areaSqm != null && l.areaSqm == null) l.areaSqm = l.fields.areaSqm;
@@ -1029,6 +1203,18 @@ window.WW_APP = {
       l.occupancyStatus = 'vacant';
     }
     l.images = this._resolveListingImages(l.images);
+    if (l.likeCount != null || l.likedByMe) {
+      const lid = l.id;
+      let entry = this.likes[lid];
+      if (!entry || typeof entry === 'number') entry = { count: typeof entry === 'number' ? entry : 0, users: [] };
+      if (l.likeCount != null) entry.count = Math.max(entry.count || 0, Number(l.likeCount) || 0);
+      if (l.likedByMe && this._getLikerId) {
+        const liker = this._getLikerId();
+        if (entry.users.indexOf(liker) === -1) entry.users.push(liker);
+        entry.count = Math.max(entry.count, entry.users.length);
+      }
+      this.likes[lid] = entry;
+    }
     return l;
   },
 
@@ -1802,7 +1988,7 @@ window.WW_APP = {
         if (mode === 'buy') this.switchToMode('buy');
         if (mode === 'sell') this.switchToMode('sell');
         if (mode === 'rent') this.selectCategory('rentalsHouses');
-        if (mode === 'land') this.selectCategory('residentialStands');
+        if (mode === 'land') this.selectCategory('farmPlots');
       });
     });
 
@@ -2286,18 +2472,22 @@ window.WW_APP = {
     const listing = this.listings.find(l => l.id === listingId);
     if (!listing) return;
     listing.verificationStatus = 'approved';
-    this.saveListingsToStorage();
-    showToast('Verification approved. Listing is now visible.', 'success');
-    this.renderAdminVerification();
+    const self = this;
+    this._persistListingToServer(listing).then(function() {
+      showToast('Verification approved. Listing is now visible.', 'success');
+      self.renderAdminVerification();
+    });
   },
   
   rejectVerification: function(listingId) {
     const listing = this.listings.find(l => l.id === listingId);
     if (!listing) return;
     listing.verificationStatus = 'rejected';
-    this.saveListingsToStorage();
-    showToast('Verification rejected. Listing will remain hidden.', 'error');
-    this.renderAdminVerification();
+    const self = this;
+    this._persistListingToServer(listing).then(function() {
+      showToast('Verification rejected. Listing will remain hidden.', 'error');
+      self.renderAdminVerification();
+    });
   },
   
   updateAdminStats: function() {
@@ -2334,10 +2524,11 @@ window.WW_APP = {
     }
     
     listing.isAd = !listing.isAd;
-    this.saveListingsToStorage();
-    
-    showToast(`Listing ${listing.isAd ? 'marked as ad' : 'removed from ads'}`, 'success');
-    this.renderAdminListings($id('adminListingsSearch')?.value || '');
+    const self = this;
+    this._persistListingToServer(listing).then(function() {
+      showToast('Listing ' + (listing.isAd ? 'marked as ad' : 'removed from ads'), 'success');
+      self.renderAdminListings(($id('adminListingsSearch') && $id('adminListingsSearch').value) || '');
+    });
   },
   
   showPriorityModal: function(listingId) {
@@ -2401,10 +2592,12 @@ window.WW_APP = {
     modal.querySelector('#savePriority').addEventListener('click', () => {
       const priority = parseInt(priorityRange.value);
       listing.adminPriority = priority;
-      this.saveListingsToStorage();
-      showToast(`Priority set to ${priority}`, 'success');
-      modal.remove();
-      this.renderAdminListings($id('adminListingsSearch')?.value || '');
+      const self = this;
+      this._persistListingToServer(listing).then(function() {
+        showToast('Priority set to ' + priority, 'success');
+        modal.remove();
+        self.renderAdminListings(($id('adminListingsSearch') && $id('adminListingsSearch').value) || '');
+      });
     });
     
     modal.addEventListener('click', (e) => {
@@ -2548,12 +2741,22 @@ window.WW_APP = {
   },
   
   adminDeleteListing: function(listingId) {
-    if (confirm('Are you sure you want to delete this listing? This action cannot be undone.')) {
-      this.deleteListingOnBackend(listingId);
-      this.listings = this.listings.filter(listing => listing.id !== listingId);
-      this.saveListingsToStorage();
+    const self = this;
+    if (!confirm('Are you sure you want to delete this listing? This action cannot be undone.')) return;
+    const done = function() {
+      self.listings = self.listings.filter(listing => listing.id !== listingId);
+      self.saveListingsToStorage();
       showToast('Listing deleted successfully', 'success');
-      this.renderAdminListings($id('adminListingsSearch')?.value || '');
+      self.renderAdminListings(($id('adminListingsSearch') && $id('adminListingsSearch').value) || '');
+      try { self.loadListingsFromStorage(); } catch (_) {}
+    };
+    if (this._isMongoId(listingId) && window._wwGetToken()) {
+      window._wwApi('/api/admin/listings/' + encodeURIComponent(listingId), { method: 'DELETE', timeout: 30000 })
+        .then(done)
+        .catch(function() { self.deleteListingOnBackend(listingId).then(done); });
+    } else {
+      this.deleteListingOnBackend(listingId);
+      done();
     }
   },
   
@@ -2732,11 +2935,13 @@ window.WW_APP = {
         listing.occupancyStatus = modal.querySelector('#editOccupancy')?.value || 'vacant';
       }
       
-      this.saveListingsToStorage();
-      this.checkSavedSearchesForVacancies();
-      showToast('Listing updated successfully', 'success');
-      modal.remove();
-      this.renderAdminListings($id('adminListingsSearch')?.value || '');
+      const self = this;
+      this._persistListingToServer(listing).then(function() {
+        self.checkSavedSearchesForVacancies();
+        showToast('Listing updated successfully', 'success');
+        modal.remove();
+        self.renderAdminListings(($id('adminListingsSearch') && $id('adminListingsSearch').value) || '');
+      });
     });
     
     modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
@@ -3325,21 +3530,9 @@ HOW TO USE THE APP:
     if (adminView) adminView.style.display = 'block';
     
     this.currentView = 'admin';
+    this.setupAdminEventListeners();
     this.updateAdminStats();
-    
-    if (this.adminView === 'listings') {
-      this.renderAdminListings();
-    } else if (this.adminView === 'users') {
-      this.renderAdminUsers();
-    } else if (this.adminView === 'support') {
-      this.renderAdminSupport();
-    } else if (this.adminView === 'help') {
-      this.renderAdminHelp();
-    } else if (this.adminView === 'categories') {
-      this.renderAdminCategories();
-    } else if (this.adminView === 'verification') {
-      this.renderAdminVerification();
-    }
+    this.switchAdminTab(this.adminView || 'listings');
   },
   
   updateNavHighlight: function() {
@@ -3516,76 +3709,8 @@ HOW TO USE THE APP:
     }
   },
   
-  // New: Category popup when Buy is pressed
   showBuyCategoryPopup: function() {
-    // Remove any existing popup
-    const existing = document.querySelector('.buy-category-popup');
-    if (existing) existing.remove();
-    
-    const categories = this.categories.walls;
-    const modal = document.createElement('div');
-    modal.className = 'modal buy-category-popup';
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
-    
-    // "All Available Listings" button
-    const allBtn = document.createElement('button');
-    allBtn.className = 'btn btn-primary btn-large';
-    allBtn.innerHTML = '<i class="fas fa-globe"></i> All Available Listings';
-    allBtn.style.cssText = 'width:100%; padding:16px; font-size:16px; margin-bottom:16px;';
-    
-    // Grid for categories
-    const grid = document.createElement('div');
-    grid.className = 'category-grid-popup';
-    grid.style.cssText = 'display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 20px 0;';
-    
-    categories.forEach(cat => {
-      const btn = document.createElement('button');
-      btn.className = 'category-item-btn';
-      btn.style.cssText = 'display: flex; flex-direction: column; align-items: center; padding: 20px; border: 2px solid #e0e0e0; border-radius: 8px; background: white; cursor: pointer; transition: all 0.3s;';
-      btn.innerHTML = `
-        <div style="width:50px;height:50px;background:#C8B897;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:12px;">
-          <i class="${cat.icon}" style="font-size: 20px; color: white;"></i>
-        </div>
-        <span style="font-weight: 500; font-size: 14px; text-align: center;">${cat.label}</span>
-      `;
-      btn.addEventListener('click', () => {
-        modal.remove();
-        this.selectCategory(cat.key);
-      });
-      // Hover effects
-      btn.addEventListener('mouseenter', () => {
-        btn.style.borderColor = '#C8B897';
-        btn.style.transform = 'translateY(-2px)';
-      });
-      btn.addEventListener('mouseleave', () => {
-        btn.style.borderColor = '#e0e0e0';
-        btn.style.transform = 'translateY(0)';
-      });
-      grid.appendChild(btn);
-    });
-    
-    const container = document.createElement('div');
-    container.className = 'modal-content';
-    container.style.cssText = 'background: white; border-radius: 12px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;';
-    
-    const title = document.createElement('h3');
-    title.textContent = 'Choose a Category';
-    title.style.cssText = 'margin-top:0; text-align:center; margin-bottom:20px;';
-    
-    allBtn.addEventListener('click', () => {
-      modal.remove();
-      this.showAllListings();
-    });
-    
-    container.appendChild(title);
-    container.appendChild(allBtn);
-    container.appendChild(grid);
-    modal.appendChild(container);
-    document.body.appendChild(modal);
-    
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.remove();
-    });
+    this._buildCategoryPickerModal({ mode: 'buy', title: 'Choose a category', showAllButton: true });
   },
   
   // Saved Searches View (new)
@@ -3985,15 +4110,7 @@ HOW TO USE THE APP:
     
     const likeCount = this._getLikeCount(listing.id);
     const liked = this._hasLiked(listing.id);
-    if (likeCount > 0) {
-      likeButton.innerHTML = '<i class="' + (liked ? 'fas' : 'far') + ' fa-heart" style="color:#2E7D32;"></i>';
-      const badge = document.createElement('div');
-      badge.textContent = likeCount;
-      badge.style.cssText = 'position: absolute; top: -5px; right: -5px; background: rgba(46,125,50,0.9); color: white; padding: 1px 5px; border-radius: 10px; font-size: 9px; font-weight: 600; min-width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; z-index: 4; border: 2px solid white;';
-      likeButton.appendChild(badge);
-    } else {
-      likeButton.innerHTML = '<i class="' + (liked ? 'fas' : 'far') + ' fa-heart"></i>';
-    }
+    likeButton.innerHTML = this._likeHeartHtml(liked, likeCount);
     likeButton.addEventListener('click', (e) => { e.stopPropagation(); this.toggleLike(listing.id); });
     
     imgContainer.appendChild(likeButton);
@@ -4117,11 +4234,7 @@ HOW TO USE THE APP:
     likeButton.style.cssText = `position: absolute; ${listing.isAd || listing.bidEnabled ? 'top: 30px;' : 'top: 6px;'} right: 6px; width: 28px; height: 28px; background: rgba(255,255,255,0.95); border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 3; font-size: 12px;`;
     const likeCount = this._getLikeCount(listing.id);
     const liked = this._hasLiked(listing.id);
-    if (likeCount > 0) {
-      likeButton.innerHTML = '<i class="' + (liked ? 'fas' : 'far') + ' fa-heart" style="color:#2E7D32;"></i>';
-    } else {
-      likeButton.innerHTML = '<i class="' + (liked ? 'fas' : 'far') + ' fa-heart"></i>';
-    }
+    likeButton.innerHTML = this._likeHeartHtml(liked, likeCount);
     likeButton.addEventListener('click', (e) => { e.stopPropagation(); this.toggleLike(listing.id); });
     imgContainer.appendChild(likeButton);
     // (image already appended above when present)
@@ -4199,29 +4312,30 @@ HOW TO USE THE APP:
       nowLiked = false;
     }
     this.likes[listingId] = entry;
+    const listing = this.listings.find(l => l.id === listingId);
+    if (listing) listing.likedByMe = nowLiked;
     this.saveLikes();
     this.sortListings();
-    const cards = $$(`.listing-card[data-id="${listingId}"]`);
-    cards.forEach(card => {
-      const likeButton = card.querySelector('.like-button');
-      if (likeButton) {
-        const likeCount = entry.count;
-        const existingBadge = likeButton.querySelector('div');
-        if (existingBadge) existingBadge.remove();
-        const iconClass = nowLiked ? 'fas' : 'far';
-        if (likeCount > 0) {
-          likeButton.innerHTML = '<i class="' + iconClass + ' fa-heart" style="color:#2E7D32;"></i>';
-          const badge = document.createElement('div');
-          badge.textContent = likeCount;
-          badge.style.cssText = 'position: absolute; top: -5px; right: -5px; background: rgba(46,125,50,0.9); color: white; padding: 1px 5px; border-radius: 10px; font-size: 9px; font-weight: 600; min-width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; z-index: 4; border: 2px solid white;';
-          likeButton.appendChild(badge);
-        } else {
-          likeButton.innerHTML = '<i class="' + iconClass + ' fa-heart"></i>';
-        }
-      }
-    });
-    this.saveListingsToStorage();
+    this._updateLikeButtonUI(listingId);
     showToast(nowLiked ? 'Added to favorites!' : 'Removed from favorites', nowLiked ? 'success' : 'info');
+    const self = this;
+    if (this._hasServerAuth() && this._isMongoId(listingId)) {
+      window._wwApi('/api/listings/' + encodeURIComponent(listingId) + '/like', { method: 'POST', body: {}, timeout: 20000 })
+        .then(function(data) {
+          if (!data) return;
+          entry.count = data.likeCount != null ? data.likeCount : entry.count;
+          if (data.liked) {
+            if (entry.users.indexOf(liker) === -1) entry.users.push(liker);
+          } else {
+            entry.users = entry.users.filter(u => u !== liker);
+          }
+          self.likes[listingId] = entry;
+          if (listing) listing.likeCount = entry.count;
+          self.saveLikes();
+          self._updateLikeButtonUI(listingId);
+        })
+        .catch(function(err) { console.warn('Like sync failed:', err && err.message); });
+    }
   },
 
   // Format a timestamp as "5 minutes ago", "2 days ago", etc.
@@ -4722,72 +4836,11 @@ HOW TO USE THE APP:
   },
   
   renderCategorySelection: function(categoryType, mode) {
-    $$('.ww-popup').forEach(p => p.remove());
-    const categories = this.categories.walls;
-    if (!categories) return;
-    
-    const popup = document.createElement('div');
-    popup.className = 'ww-popup';
-    popup.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
-    
-    const content = document.createElement('div');
-    content.className = 'ww-popup-content';
-    content.style.cssText = 'background: white; border-radius: 12px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;';
-    
-    const title = document.createElement('h3');
-    title.textContent = mode === 'sell' ? 'Select category to list your service or property' : 'Select category to browse';
-    title.style.marginTop = '0';
-    title.style.textAlign = 'center';
-    title.style.marginBottom = '20px';
-    
-    const grid = document.createElement('div');
-    grid.className = 'category-grid-popup';
-    grid.style.cssText = 'display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 20px 0;';
-    
-    categories.forEach(cat => {
-      const btn = document.createElement('button');
-      btn.className = 'category-item-btn';
-      btn.style.cssText = 'display: flex; flex-direction: column; align-items: center; padding: 20px; border: 2px solid #e0e0e0; border-radius: 8px; background: white; cursor: pointer; transition: all 0.3s;';
-      btn.innerHTML = `
-        <div style="width:50px;height:50px;background:#C8B897;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:12px;">
-          <i class="${cat.icon}" style="font-size: 20px; color: white;"></i>
-        </div>
-        <span style="font-weight: 500; font-size: 14px; text-align: center;">${cat.label}</span>
-      `;
-      btn.addEventListener('mouseenter', () => {
-        btn.style.borderColor = '#C8B897';
-        btn.style.transform = 'translateY(-2px)';
-      });
-      btn.addEventListener('mouseleave', () => {
-        btn.style.borderColor = '#e0e0e0';
-        btn.style.transform = 'translateY(0)';
-      });
-      btn.addEventListener('click', () => {
-        popup.remove();
-        if (mode === 'sell') {
-          this.currentCategory = cat;
-          this.renderSellerForm('walls');
-        } else {
-          this.selectCategory(cat.key);
-        }
-      });
-      grid.appendChild(btn);
-    });
-    
-    const backBtn = document.createElement('button');
-    backBtn.className = 'btn btn-outline';
-    backBtn.textContent = 'Cancel';
-    backBtn.style.cssText = 'width:100%;margin-top:16px;padding:12px;';
-    backBtn.addEventListener('click', () => popup.remove());
-    
-    content.appendChild(title);
-    content.appendChild(grid);
-    content.appendChild(backBtn);
-    popup.appendChild(content);
-    document.body.appendChild(popup);
-    
-    popup.addEventListener('click', (e) => {
-      if (e.target === popup) popup.remove();
+    $$('.ww-popup, .category-picker-modal').forEach(p => p.remove());
+    this._buildCategoryPickerModal({
+      mode: mode === 'sell' ? 'sell' : 'buy',
+      title: mode === 'sell' ? 'Select category to list' : 'Select category to browse',
+      showAllButton: mode !== 'sell'
     });
   },
   
@@ -4812,7 +4865,7 @@ HOW TO USE THE APP:
     
     let categorySpecificFields = '';
     
-    if (['rentalsHouses','rentalsFlats','rentalsRooms','singleRoomsToRent','cottagesToRent','bnb','sellingHouses','sellingFlats','cottagesToSale','boardingHouses','residentialStands','farmPlots'].includes(catKey)) {
+    if (this._getPropertyFormCategories().includes(catKey)) {
       categorySpecificFields += `
         <div class="form-group">
           <label style="display:block;font-size:14px;font-weight:500;margin-bottom:8px;color:#333;">Property Features (Select all that apply)</label>
@@ -5333,6 +5386,8 @@ HOW TO USE THE APP:
           showToast('Listing submitted for verification. It will appear after admin approval.', 'success');
         } else {
           showToast('Listing created successfully!', 'success');
+          const self = window.WW_APP;
+          setTimeout(function() { try { self.loadListingsFromStorage(); } catch (_) {} }, 500);
         }
         this.switchToMode('buy');
       });
@@ -5527,7 +5582,7 @@ HOW TO USE THE APP:
               let count = 0;
               if (type === 'All types') count = this.listings.length;
               else if (type === 'For Sale') {
-                count = this.listings.filter(l => ['sellingHouses', 'sellingFlats', 'cottagesToSale', 'residentialStands', 'farmPlots'].includes(l.category)).length;
+                count = this.listings.filter(l => l.category === 'farmPlots').length;
               } else if (type === 'For Rent') {
                 count = this.listings.filter(l => ['rentalsHouses', 'rentalsFlats', 'rentalsRooms', 'singleRoomsToRent', 'cottagesToRent', 'bnb', 'boardingHouses'].includes(l.category)).length;
               } else if (type === 'Services') {
@@ -5582,7 +5637,7 @@ HOW TO USE THE APP:
     if (this.filters.type !== 'All types') {
       filtered = filtered.filter(listing => {
         if (this.filters.type === 'For Sale') {
-          return ['sellingHouses', 'sellingFlats', 'cottagesToSale', 'residentialStands', 'farmPlots'].includes(listing.category);
+          return listing.category === 'farmPlots';
         } else if (this.filters.type === 'For Rent') {
           return ['rentalsHouses', 'rentalsFlats', 'rentalsRooms', 'singleRoomsToRent', 'cottagesToRent', 'bnb', 'boardingHouses'].includes(listing.category);
         } else if (this.filters.type === 'Services') {
@@ -6737,9 +6792,11 @@ HOW TO USE THE APP:
       listing.bidEndTime = null;
       listing.bids = [];
     }
-    this.saveListingsToStorage();
-    showToast(`Bidding ${listing.bidEnabled ? 'enabled' : 'disabled'} for this listing`, 'success');
-    this.renderAdminListings($id('adminListingsSearch')?.value || '');
+    const self = this;
+    this._persistListingToServer(listing).then(function() {
+      showToast('Bidding ' + (listing.bidEnabled ? 'enabled' : 'disabled') + ' for this listing', 'success');
+      self.renderAdminListings(($id('adminListingsSearch') && $id('adminListingsSearch').value) || '');
+    });
   },
 
   // ============================================================
@@ -6914,36 +6971,37 @@ HOW TO USE THE APP:
   loadLikesFromServer: function() {
     const self = this;
     const cfg = window.WW_API || {};
-    if (!cfg.API_BASE || !this.user) return;
+    if (!cfg.API_BASE || !this._hasServerAuth()) return;
     return window._wwApi('/api/me/likes', { method: 'GET', timeout: 20000 })
       .then(function(data) {
-        const ids = (data && (data.likes || data)) || [];
+        const ids = (data && data.likes) ? data.likes : (Array.isArray(data) ? data : []);
         if (!Array.isArray(ids)) return;
         const liker = self._getLikerId();
         ids.forEach(function(id) {
-          let entry = self.likes[id];
+          const lid = (id && id.id) ? id.id : id;
+          if (!lid) return;
+          let entry = self.likes[lid];
           if (!entry || typeof entry === 'number') entry = { count: typeof entry === 'number' ? entry : 0, users: [] };
           if (entry.users.indexOf(liker) === -1) entry.users.push(liker);
           entry.count = Math.max(entry.count || 0, entry.users.length);
-          self.likes[id] = entry;
+          self.likes[lid] = entry;
+          const listing = self.listings.find(l => l.id === lid);
+          if (listing) { listing.likedByMe = true; listing.likeCount = entry.count; }
         });
         self.saveLikes();
-        try { self.sortListings(); } catch (_) {}
+        try { self.sortListings(); if (self.currentView === 'app') self.showAllListings(); } catch (_) {}
       })
       .catch(function(err) { console.warn('Likes sync failed:', err && err.message); });
   },
   _syncLikeToServer: function(listingId) {
-    const cfg = window.WW_API || {};
-    if (!cfg.API_BASE || !this.user || !listingId) return;
-    window._wwApi('/api/listings/' + encodeURIComponent(listingId) + '/like', { method: 'POST', body: {}, timeout: 20000 })
-      .catch(function(err) { console.warn('Like sync failed:', err && err.message); });
+    /* handled inside toggleLike */
   },
 
   // ---- Saved searches (server-backed) ----
   loadSavedSearchesFromServer: function() {
     const self = this;
     const cfg = window.WW_API || {};
-    if (!cfg.API_BASE || !this.user) return;
+    if (!cfg.API_BASE || !this._hasServerAuth()) return;
     return window._wwApi('/api/saved-searches', { method: 'GET', timeout: 20000 })
       .then(function(data) {
         const arr = (data && (data.savedSearches || data)) || [];
@@ -7196,7 +7254,7 @@ HOW TO USE THE APP:
       if (_origUpdateUserMenu) {
         window.WW_APP.updateUserMenu = function() {
           const r = _origUpdateUserMenu.apply(this, arguments);
-          if (this.user) {
+          if (this.user && this._hasServerAuth()) {
             try { this.loadLikesFromServer(); } catch(_) {}
             try { this.loadSavedSearchesFromServer(); } catch(_) {}
             try { this.setupWebPush(); } catch(_) {}

@@ -686,10 +686,10 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .bottom-nav-tab,
 .bottom-nav-search {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 2px;
   background: none;
   border: none;
   font-size: 13px;

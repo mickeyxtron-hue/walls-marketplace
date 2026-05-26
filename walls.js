@@ -555,9 +555,10 @@ window.WW_APP = {
   },
 
   _listingPropertyMetaSvg: {
-    bed: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7v11M3 7h7a2 2 0 0 1 2 2v2M3 7V5a2 2 0 0 1 2-2h2M10 11h4a2 2 0 0 1 2 2v5M10 11V9a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M14 18h6v-3a2 2 0 0 0-2-2h-2"/></svg>',
-    bath: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16a2 2 0 0 1 2 2v2H2v-2a2 2 0 0 1 2-2z"/><path d="M6 12V7a2 2 0 0 1 2-2h1"/><path d="M12 5h1a2 2 0 0 1 2 2v5"/></svg>',
-    area: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>'
+    // FIX: use Font Awesome icons (bed for bedrooms, shower+tub for bathrooms)
+    bed:  '<i class="fas fa-bed" aria-hidden="true" style="margin-right:4px;"></i>',
+    bath: '<span class="bath-icons" aria-hidden="true" style="display:inline-flex;gap:2px;margin-right:4px;"><i class="fas fa-shower"></i><i class="fas fa-bath"></i></span>',
+    area: '<i class="fas fa-vector-square" aria-hidden="true" style="margin-right:4px;"></i>'
   },
 
   _appendListingPropertyMeta: function(card, listing) {
@@ -4072,9 +4073,11 @@ HOW TO USE THE APP:
     if (hasImage) {
       img = document.createElement('img');
       img.loading = 'lazy';
+      img.decoding = 'async';
+      img.fetchPriority = 'low';
       img.src = listing.images[0];
       img.alt = '';
-      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s;';
+      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s; background:#f0f0f0;';
       img.onerror = function() { this.style.display = 'none'; imgContainer.style.background = '#f0f0f0'; };
     } else {
       imgContainer.style.background = '#f0f0f0';
@@ -4199,9 +4202,11 @@ HOW TO USE THE APP:
     if (hasImage) {
       img = document.createElement('img');
       img.loading = 'lazy';
+      img.decoding = 'async';
+      img.fetchPriority = 'low';
       img.src = listing.images[0];
       img.alt = '';
-      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; background:#f0f0f0;';
       img.onerror = function() { this.style.display = 'none'; imgContainer.style.background = '#f0f0f0'; };
       imgContainer.appendChild(img);
     } else {
@@ -4547,12 +4552,12 @@ HOW TO USE THE APP:
       imagesHTML = `
         <div class="listing-images-slider" style="position:relative;">
           <div class="main-image" style="position:relative;">
-            <img src="${listing.images[0]}" alt="${listing.title}" id="mainListingImage" style="width:100%;height:${isMobile ? '250px' : '400px'};object-fit:cover;border-radius:12px;cursor:pointer">
+            <img src="${listing.images[0]}" alt="${listing.title}" id="mainListingImage" loading="lazy" decoding="async" onclick="window.WW_APP.openLightbox(window.WW_APP.currentListingImages, window.WW_APP.currentImageIndex||0)" style="width:100%;height:${isMobile ? '250px' : '400px'};object-fit:cover;border-radius:12px;cursor:zoom-in">
             ${listing.images.length > 1 ? `<button class="prev-image" onclick="window.WW_APP.navigateImages('prev')" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.7);color:white;border:none;border-radius:50%;width:40px;height:40px;font-size:20px;cursor:pointer;">❮</button>
             <button class="next-image" onclick="window.WW_APP.navigateImages('next')" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.7);color:white;border:none;border-radius:50%;width:40px;height:40px;font-size:20px;cursor:pointer;">❯</button>
             <div style="position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.7);color:white;padding:4px 12px;border-radius:12px;font-size:14px;">1 / ${listing.images.length}</div>` : ''}
           </div>
-          ${listing.images.length > 1 ? `<div class="image-thumbnails" style="display:flex;gap:8px;margin-top:12px;overflow-x:auto;padding-bottom:8px;">${listing.images.map((img, i) => `<img src="${img}" alt="Thumbnail" onclick="window.WW_APP.showImage(${i})" style="width:80px;height:60px;object-fit:cover;border-radius:8px;cursor:pointer;border:${i===0?'2px solid #C8B897':'1px solid #ddd'};">`).join('')}</div>` : ''}
+          ${listing.images.length > 1 ? `<div class="image-thumbnails" style="display:flex;gap:8px;margin-top:12px;overflow-x:auto;padding-bottom:8px;">${listing.images.map((img, i) => `<img src="${img}" alt="Thumbnail" loading="lazy" decoding="async" ondblclick="window.WW_APP.openLightbox(window.WW_APP.currentListingImages, ${i})" onclick="window.WW_APP.showImage(${i})" style="width:80px;height:60px;object-fit:cover;border-radius:8px;cursor:pointer;border:${i===0?'2px solid #C8B897':'1px solid #ddd'};">`).join('')}</div>` : ''}
         </div>`;
     } else {
       imagesHTML = '<div class="no-image" style="background:#f0f0f0;border-radius:12px;padding:40px;text-align:center;color:#666;"><i class="fas fa-image" style="font-size:48px;margin-bottom:16px;"></i><p>No images available</p></div>';
@@ -4707,14 +4712,85 @@ HOW TO USE THE APP:
   },
   
   openImageModal: function(imageSrc) {
-    const modal = $id('imageModal');
-    const modalImage = $id('modalImage');
-    if (modal && modalImage) {
-      modalImage.src = imageSrc;
-      modal.style.display = 'flex';
-      modal.setAttribute('aria-hidden', 'false');
-      document.body.style.overflow = 'hidden';
-    }
+    // Back-compat: route single image through the new lightbox
+    this.openLightbox([imageSrc], 0);
+  },
+
+  // ====== NEW: swipeable, full-screen image lightbox ======
+  openLightbox: function(images, startIndex) {
+    if (!images || !images.length) return;
+    const self = this;
+    // Remove any existing instance
+    const existing = document.getElementById('wwLightbox');
+    if (existing) existing.remove();
+
+    let idx = Math.max(0, Math.min(startIndex || 0, images.length - 1));
+
+    const overlay = document.createElement('div');
+    overlay.id = 'wwLightbox';
+    overlay.className = 'ww-lightbox';
+    overlay.innerHTML = `
+      <button class="ww-lb-close" aria-label="Close">&times;</button>
+      <button class="ww-lb-prev" aria-label="Previous">&#10094;</button>
+      <div class="ww-lb-stage">
+        <img class="ww-lb-img" alt="" decoding="async" />
+        <div class="ww-lb-counter"></div>
+      </div>
+      <button class="ww-lb-next" aria-label="Next">&#10095;</button>
+    `;
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
+
+    const imgEl     = overlay.querySelector('.ww-lb-img');
+    const counter   = overlay.querySelector('.ww-lb-counter');
+    const showAt = function(i) {
+      idx = (i + images.length) % images.length;
+      imgEl.src = images[idx];
+      counter.textContent = (idx + 1) + ' / ' + images.length;
+    };
+    showAt(idx);
+
+    const close = function() {
+      overlay.remove();
+      document.body.style.overflow = '';
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = function(e) {
+      if (e.key === 'Escape') close();
+      else if (e.key === 'ArrowLeft')  showAt(idx - 1);
+      else if (e.key === 'ArrowRight') showAt(idx + 1);
+    };
+    document.addEventListener('keydown', onKey);
+
+    overlay.querySelector('.ww-lb-close').onclick = close;
+    overlay.querySelector('.ww-lb-prev').onclick  = function(e){ e.stopPropagation(); showAt(idx - 1); };
+    overlay.querySelector('.ww-lb-next').onclick  = function(e){ e.stopPropagation(); showAt(idx + 1); };
+    overlay.addEventListener('click', function(e){ if (e.target === overlay) close(); });
+
+    // Touch swipe
+    let startX = 0, startY = 0, dx = 0, swiping = false;
+    const stage = overlay.querySelector('.ww-lb-stage');
+    stage.addEventListener('touchstart', function(e){
+      if (!e.touches[0]) return;
+      startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+      dx = 0; swiping = true;
+    }, { passive: true });
+    stage.addEventListener('touchmove', function(e){
+      if (!swiping || !e.touches[0]) return;
+      dx = e.touches[0].clientX - startX;
+      const dy = e.touches[0].clientY - startY;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        imgEl.style.transform = 'translateX(' + dx + 'px)';
+      }
+    }, { passive: true });
+    stage.addEventListener('touchend', function(){
+      swiping = false;
+      imgEl.style.transition = 'transform .2s';
+      imgEl.style.transform = '';
+      setTimeout(function(){ imgEl.style.transition = ''; }, 220);
+      if (dx <=  -50) showAt(idx + 1);
+      else if (dx >=  50) showAt(idx - 1);
+    });
   },
   
   closeImageModal: function() {
@@ -5973,45 +6049,56 @@ HOW TO USE THE APP:
       if (!window.google || !google.accounts || !google.accounts.id) {
         showToast('Google SDK failed to load.', 'error'); return;
       }
-      google.accounts.id.initialize({
-        client_id: cfg.GOOGLE_CLIENT_ID,
-        callback: function(resp) {
-          if (!resp || !resp.credential) {
-            showToast('Google login cancelled.', 'error'); return;
-          }
-          // Decode JWT payload (id_token) for fallback profile
-          let profile = {};
-          try {
-            const payload = JSON.parse(atob(resp.credential.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-            profile = { email: payload.email, name: payload.name, picture: payload.picture, sub: payload.sub };
-          } catch (e) {}
-          self._completeSocialLogin('google', resp.credential, profile);
-        },
-        auto_select: false,
-        cancel_on_tap_outside: true
-      });
-      google.accounts.id.prompt(function(notification) {
-        if (notification.isNotDisplayed && notification.isNotDisplayed()) {
-          // Fallback: render a button-driven OAuth popup via OAuth2 token client
-          try {
-            const tokenClient = google.accounts.oauth2.initTokenClient({
-              client_id: cfg.GOOGLE_CLIENT_ID,
-              scope: 'openid email profile',
-              callback: async function(tokenResp) {
-                if (!tokenResp || !tokenResp.access_token) { showToast('Google login cancelled.', 'error'); return; }
-                try {
-                  const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                    headers: { Authorization: 'Bearer ' + tokenResp.access_token }
-                  });
-                  const profile = await r.json();
-                  self._completeSocialLogin('google', tokenResp.access_token, profile);
-                } catch (e) { showToast('Could not fetch Google profile.', 'error'); }
+      // FIX (Google SDK):
+      //  * Initialize GIS exactly once (avoids "initialize() called multiple times").
+      //  * Skip One Tap / FedCM prompt entirely — it fails in many browsers
+      //    (FedCM disabled, NetworkError, AbortError) and was the root cause
+      //    of the "SDK not working" report. Go straight to the OAuth2 popup
+      //    via initTokenClient, which is the recommended button flow.
+      if (!window.__wwGoogleInited) {
+        try {
+          google.accounts.id.initialize({
+            client_id: cfg.GOOGLE_CLIENT_ID,
+            callback: function () {},
+            auto_select: false,
+            cancel_on_tap_outside: true,
+            use_fedcm_for_prompt: true
+          });
+        } catch (e) { /* harmless */ }
+        window.__wwGoogleInited = true;
+      }
+      try {
+        if (!window.__wwGoogleTokenClient) {
+          window.__wwGoogleTokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: cfg.GOOGLE_CLIENT_ID,
+            scope: 'openid email profile',
+            callback: async function (tokenResp) {
+              if (!tokenResp || !tokenResp.access_token) {
+                showToast('Google login cancelled.', 'error'); return;
               }
-            });
-            tokenClient.requestAccessToken();
-          } catch (e) { showToast('Google login unavailable.', 'error'); }
+              try {
+                const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                  headers: { Authorization: 'Bearer ' + tokenResp.access_token }
+                });
+                const profile = await r.json();
+                self._completeSocialLogin('google', tokenResp.access_token, profile);
+              } catch (e) {
+                console.error(e);
+                showToast('Could not fetch Google profile.', 'error');
+              }
+            },
+            error_callback: function (err) {
+              console.warn('Google OAuth error:', err);
+              if (err && err.type === 'popup_closed') return;
+              showToast('Google login failed. Please try again.', 'error');
+            }
+          });
         }
-      });
+        window.__wwGoogleTokenClient.requestAccessToken({ prompt: 'consent' });
+      } catch (e) {
+        console.error(e);
+        showToast('Google login unavailable.', 'error');
+      }
     } catch (e) {
       console.error(e);
       showToast('Could not load Google login.', 'error');

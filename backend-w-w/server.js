@@ -727,20 +727,32 @@ app.delete('/api/listings/:id', authRequired, async (req, res) => {
 // Likes
 // ---------------------------------------------------------------------------
 app.post('/api/listings/:id/like', authRequired, async (req, res) => {
+  // FIX: use atomic $addToSet / $pull with validators OFF so legacy listings
+  // missing required fields (e.g. ownerId from old db.json seeds) can still
+  // be liked without re-validating the whole document.
   try {
     const uid = authUserId(req);
     if (!uid) return res.status(401).json({ error: 'unauthenticated' });
     if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) {
       return res.status(400).json({ error: 'invalid listing id' });
     }
-    const doc = await Listing.findById(req.params.id);
+    const doc = await Listing.findById(req.params.id).select('likedBy ownerId');
     if (!doc) return res.status(404).json({ error: 'not found' });
-    const idx = (doc.likedBy || []).findIndex(x => x.toString() === String(uid));
-    if (idx >= 0) doc.likedBy.splice(idx, 1);
-    else doc.likedBy.push(uid);
-    await doc.save();
-    res.json({ liked: idx < 0, likeCount: doc.likedBy.length, listingId: doc._id.toString() });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const already = (doc.likedBy || []).some(x => x.toString() === String(uid));
+    const update = already
+      ? { $pull: { likedBy: uid } }
+      : { $addToSet: { likedBy: uid } };
+    const updated = await Listing.findByIdAndUpdate(
+      req.params.id,
+      update,
+      { new: true, runValidators: false, strict: false }
+    ).select('likedBy');
+    const likeCount = (updated && updated.likedBy) ? updated.likedBy.length : 0;
+    res.json({ liked: !already, likeCount, listingId: String(req.params.id) });
+  } catch (e) {
+    console.error('like error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get('/api/me/likes', authRequired, async (req, res) => {

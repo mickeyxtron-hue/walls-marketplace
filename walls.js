@@ -2925,7 +2925,14 @@ window.WW_APP = {
       
       listing.bidEnabled = modal.querySelector('#editBidEnabled').checked;
       if (listing.bidEnabled) {
-        listing.bidEndTime = modal.querySelector('#editBidEndTime').value || new Date(Date.now() + 7*24*60*60*1000).toISOString().slice(0, 16);
+        const raw = modal.querySelector('#editBidEndTime').value;
+        let iso;
+        try {
+          iso = raw ? new Date(raw).toISOString() : new Date(Date.now() + 7*24*60*60*1000).toISOString();
+        } catch (_) {
+          iso = new Date(Date.now() + 7*24*60*60*1000).toISOString();
+        }
+        listing.bidEndTime = iso;
         if (!listing.bids) listing.bids = [];
       } else {
         listing.bidEndTime = null;
@@ -4575,7 +4582,7 @@ HOW TO USE THE APP:
       if (listing.bids && listing.bids.length > 0) {
         bidsHTML = listing.bids.map(bid => {
           const statusClass = bid.status === 'accepted' ? 'accepted' : bid.status === 'rejected' ? 'rejected' : '';
-          const isOwner = this.user && listing.contact && listing.contact.email === this.user.email;
+          const isOwner = this.user && (this._listingBelongsToCurrentUser(listing) || !!this.user.isAdmin);
           return `
             <div class="bid-card ${statusClass}">
               <div class="bid-amount">$${bid.amount}</div>
@@ -4587,7 +4594,8 @@ HOW TO USE THE APP:
         }).join('');
       }
       
-      const bidForm = (!expired && this.user) ? `
+      const ownsThis = this.user && this._listingBelongsToCurrentUser(listing);
+      const bidForm = (!expired && this.user && !ownsThis) ? `
         <div style="margin-top:20px;padding:20px;background:#f9f9f9;border-radius:12px;">
           <h4>Place a Bid</h4>
           <div class="form-group">
@@ -6626,7 +6634,7 @@ HOW TO USE THE APP:
   
   deleteUserAccount: function() {
     if (confirm('Are you sure you want to delete your account? This cannot be undone and all your listings will be removed.')) {
-      this.listings = this.listings.filter(l => l.createdBy !== this.user.email);
+      this.listings = this.listings.filter(l => !this._listingBelongsToCurrentUser(l));
       this.allUsers = this.allUsers.filter(u => u.id !== this.user.id);
       this.saveUsers();
       this.saveListingsToStorage();
@@ -6649,7 +6657,7 @@ HOW TO USE THE APP:
     modal.className = 'modal';
     modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 20px;';
     
-    const userListings = this.listings.filter(l => l.createdBy === this.user.email);
+    const userListings = this.listings.filter(l => this._listingBelongsToCurrentUser(l));
     
     let listingsHTML = '';
     if (userListings.length === 0) {
@@ -6701,7 +6709,7 @@ HOW TO USE THE APP:
   },
   
   toggleOccupancy: function(listingId) {
-    const listing = this.listings.find(l => l.id === listingId && l.createdBy === this.user.email);
+    const listing = this.listings.find(l => l.id === listingId && this._listingBelongsToCurrentUser(l));
     if (!listing) {
       showToast('Listing not found or not yours', 'error');
       return;
@@ -6718,7 +6726,7 @@ HOW TO USE THE APP:
   },
   
   editMyListing: function(listingId) {
-    const listing = this.listings.find(l => l.id === listingId && l.createdBy === this.user.email);
+    const listing = this.listings.find(l => l.id === listingId && this._listingBelongsToCurrentUser(l));
     if (!listing) {
       showToast('Listing not found or not yours', 'error');
       return;
@@ -6830,19 +6838,51 @@ HOW TO USE THE APP:
       return;
     }
     const message = messageEl?.value || '';
-    if (!listing.bids) listing.bids = [];
-    listing.bids.push({
+    const newBid = {
       id: 'bid_' + Date.now(),
       userId: this.user.id || this.user.email,
-      userName: this.user.name || 'User',
+      userName: this.user.name || this.user.email || 'User',
       amount: amount,
       message: message,
       createdAt: new Date().toISOString(),
       status: 'pending'
-    });
+    };
+    if (!listing.bids) listing.bids = [];
+    listing.bids.push(newBid);
     this.saveListingsToStorage();
-    showToast('Bid placed successfully!', 'success');
-    this.showListingDetails(listing);
+    showToast('Bid placed!', 'success');
+    const self = this;
+    // Persist to backend so it shows up on every device / for the owner.
+    if (this._hasServerAuth() && this._isMongoId(listing.id)) {
+      window._wwApi('/api/listings/' + encodeURIComponent(listing.id) + '/bid', {
+        method: 'POST',
+        body: { amount: amount, message: message, userName: newBid.userName },
+        timeout: 30000
+      }).then(function(saved) {
+        if (saved && Array.isArray(saved.bids)) {
+          // Merge server-issued bid ids into local list (server wins).
+          listing.bids = saved.bids.map(function(b, i) {
+            return Object.assign({}, listing.bids[i] || {}, {
+              userId: b.userId,
+              userName: b.userName || (listing.bids[i] && listing.bids[i].userName) || '',
+              amount: b.amount,
+              message: b.message || (listing.bids[i] && listing.bids[i].message) || '',
+              createdAt: b.createdAt,
+              status: b.status || (listing.bids[i] && listing.bids[i].status) || 'pending',
+              id: (listing.bids[i] && listing.bids[i].id) || ('bid_' + new Date(b.createdAt).getTime() + '_' + i)
+            });
+          });
+          self.saveListingsToStorage();
+        }
+        self.showListingDetails(listing);
+      }).catch(function(err) {
+        console.warn('Bid sync failed:', err && err.message);
+        showToast('Bid saved locally (sync failed): ' + (err && err.message), 'warning');
+        self.showListingDetails(listing);
+      });
+    } else {
+      this.showListingDetails(listing);
+    }
   },
   
   acceptBid: function(listingId, bidId) {
@@ -6852,9 +6892,15 @@ HOW TO USE THE APP:
     if (!bid) return;
     bid.status = 'accepted';
     listing.bids.forEach(b => { if (b.id !== bidId) b.status = 'rejected'; });
-    this.saveListingsToStorage();
-    showToast('Bid accepted!', 'success');
-    this.showListingDetails(listing);
+    const self = this;
+    this._persistListingToServer(listing).then(function() {
+      showToast('Bid accepted!', 'success');
+      self.showListingDetails(listing);
+    }).catch(function(err) {
+      console.warn('Accept bid sync failed:', err && err.message);
+      self.saveListingsToStorage();
+      self.showListingDetails(listing);
+    });
   },
   
   rejectBid: function(listingId, bidId) {
@@ -6863,9 +6909,15 @@ HOW TO USE THE APP:
     const bid = listing.bids.find(b => b.id === bidId);
     if (!bid) return;
     bid.status = 'rejected';
-    this.saveListingsToStorage();
-    showToast('Bid rejected', 'info');
-    this.showListingDetails(listing);
+    const self = this;
+    this._persistListingToServer(listing).then(function() {
+      showToast('Bid rejected', 'info');
+      self.showListingDetails(listing);
+    }).catch(function(err) {
+      console.warn('Reject bid sync failed:', err && err.message);
+      self.saveListingsToStorage();
+      self.showListingDetails(listing);
+    });
   },
   
   toggleBidListing: function(listingId) {
@@ -6954,18 +7006,18 @@ HOW TO USE THE APP:
       $id('wwTabUploaded').style.display = tab === 'uploaded' ? 'block' : 'none';
       $id('wwTabSaved').style.display    = tab === 'saved'    ? 'block' : 'none';
       if (count) count.textContent = tab === 'uploaded'
-        ? self.listings.filter(l => l.createdBy === self.user.email).length
+        ? self.listings.filter(l => self._listingBelongsToCurrentUser(l)).length
         : (self.savedSearches || []).length;
     }));
 
     this._renderMyUploaded($id('wwTabUploaded'));
     this._renderMySaved($id('wwTabSaved'));
-    if (count) count.textContent = this.listings.filter(l => l.createdBy === this.user.email).length;
+    if (count) count.textContent = this.listings.filter(l => this._listingBelongsToCurrentUser(l)).length;
   },
 
   _renderMyUploaded: function(host) {
     if (!host) return;
-    const mine = this.listings.filter(l => l.createdBy === this.user.email);
+    const mine = this.listings.filter(l => this._listingBelongsToCurrentUser(l));
     if (!mine.length) {
       host.innerHTML = '<div style="text-align:center;color:#666;padding:32px;"><i class="fas fa-inbox" style="font-size:40px;color:#ccc;display:block;margin-bottom:12px;"></i>You haven\'t uploaded any listings yet.</div>';
       return;

@@ -172,7 +172,10 @@ const ListingSchema = new mongoose.Schema({
   likedBy    : [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true }],
   bids       : [{
     userId   : { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    userName : { type: String, default: '' },
     amount   : Number,
+    message  : { type: String, default: '' },
+    status   : { type: String, default: 'pending' },
     createdAt: { type: Date, default: Date.now },
   }],
   views      : { type: Number, default: 0 },
@@ -331,7 +334,10 @@ function publicListing(doc, viewerId) {
     createdBy  : fields.createdBy ?? o.createdBy ?? '',
     bids       : (o.bids || []).map(b => ({
       userId   : b.userId?.toString?.(),
+      userName : b.userName || '',
       amount   : b.amount,
+      message  : b.message || '',
+      status   : b.status || 'pending',
       createdAt: b.createdAt,
     })),
     fields,
@@ -687,6 +693,16 @@ app.put('/api/listings/:id', authRequired, async (req, res) => {
     if ('price' in b) doc.price = toNumberPrice(b.price);
     if ('lat'   in b) doc.lat   = Number(b.lat);
     if ('lng'   in b) doc.lng   = Number(b.lng);
+    if (Array.isArray(b.bids)) {
+      doc.bids = b.bids.map(x => ({
+        userId  : (x.userId && mongoose.Types.ObjectId.isValid(String(x.userId))) ? x.userId : undefined,
+        userName: (x.userName || '').toString().slice(0, 120),
+        amount  : toNumberPrice(x.amount),
+        message : (x.message || '').toString().slice(0, 500),
+        status  : ['pending','accepted','rejected'].includes(x.status) ? x.status : 'pending',
+        createdAt: x.createdAt ? new Date(x.createdAt) : new Date(),
+      }));
+    }
     const mergedFields = { ...(doc.fields || {}) };
     if (b.fields && typeof b.fields === 'object') Object.assign(mergedFields, b.fields);
     ['categoryLabel', 'clientId', 'bedrooms', 'bathrooms', 'areaSqm', 'contact', 'bidEnabled'].forEach((k) => {
@@ -801,6 +817,17 @@ app.put('/api/admin/listings/:id', authRequired, async (req, res) => {
     for (const k of updatable) if (k in b) doc[k] = b[k];
     if ('images' in b) doc.images = Array.isArray(b.images) ? b.images : (tryParseJson(b.images, []) || []);
     if ('price' in b) doc.price = toNumberPrice(b.price);
+    // Admin/owner can rewrite the full bids[] (e.g. accept/reject status changes)
+    if (Array.isArray(b.bids)) {
+      doc.bids = b.bids.map(x => ({
+        userId  : (x.userId && mongoose.Types.ObjectId.isValid(String(x.userId))) ? x.userId : undefined,
+        userName: (x.userName || '').toString().slice(0, 120),
+        amount  : toNumberPrice(x.amount),
+        message : (x.message || '').toString().slice(0, 500),
+        status  : ['pending','accepted','rejected'].includes(x.status) ? x.status : 'pending',
+        createdAt: x.createdAt ? new Date(x.createdAt) : new Date(),
+      }));
+    }
     const mergedFields = { ...(doc.fields || {}) };
     ['categoryLabel', 'clientId', 'bedrooms', 'bathrooms', 'areaSqm', 'contact', 'bidEnabled',
       'isAd', 'adminPriority', 'verificationStatus', 'bidEnabled', 'bidEndTime', 'occupancyStatus', 'createdBy'
@@ -839,9 +866,14 @@ app.post('/api/listings/:id/bid', authRequired, async (req, res) => {
   try {
     const amount = toNumberPrice(req.body?.amount);
     if (!amount) return res.status(400).json({ error: 'amount required' });
+    if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) {
+      return res.status(400).json({ error: 'invalid listing id' });
+    }
     const doc = await Listing.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'not found' });
-    doc.bids.push({ userId: req.user.id, amount });
+    const message  = (req.body?.message  || '').toString().slice(0, 500);
+    const userName = (req.body?.userName || '').toString().slice(0, 120);
+    doc.bids.push({ userId: req.user.id, userName, amount, message, status: 'pending' });
     await doc.save();
 
     // Notify owner

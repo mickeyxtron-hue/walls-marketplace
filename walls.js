@@ -8,19 +8,36 @@ window.WW_APP = window.WW_APP || {};
 //   - POST EMAIL_LOGIN_URL    body { email, password } -> returns { user: {...} } on 200
 //   - POST EMAIL_REGISTER_URL body { name, email, phone, password } -> returns { user: {...} } on 200
 // Optionally set GOOGLE_VERIFY_URL to a backend that validates the Google id_token.
+// Auto-detect backend host: use same-origin when the page is served from the
+// production domain (wallsmarketplace.co.zw or its www variant) so the API
+// works regardless of where the backend is actually hosted. Falls back to the
+// Render URL only when opened from file:// or an unrelated origin.
+(function(){
+  var apiBase = 'https://wallsmarketplace.co.zw';
+  try {
+    var h = (location && location.hostname) ? location.hostname.toLowerCase() : '';
+    if (h === 'wallsmarketplace.co.zw' || h === 'www.wallsmarketplace.co.zw') {
+      apiBase = location.origin; // same-origin, avoids CORS + DNS issues
+    } else if (h && h !== 'localhost' && h !== '127.0.0.1' && !/^file:/i.test(location.protocol)) {
+      // Any other live host (preview domains, custom domains): default to same-origin
+      apiBase = location.origin;
+    }
+  } catch (_) {}
+  window.__WW_API_BASE__ = apiBase;
+})();
+
 window.WW_OAUTH = window.WW_OAUTH || {
   GOOGLE_CLIENT_ID: '463654130792-2ct7p5m2556nnrtmpm3ocuj6rfa2tisl.apps.googleusercontent.com',
-  GOOGLE_VERIFY_URL: 'https://walls-marketplace.onrender.com/api/auth/google/verify',
-  EMAIL_LOGIN_URL: 'https://walls-marketplace.onrender.com/api/auth/login',
-  EMAIL_REGISTER_URL: 'https://walls-marketplace.onrender.com/api/auth/signup'
+  GOOGLE_VERIFY_URL: window.__WW_API_BASE__ + '/api/auth/google/verify',
+  EMAIL_LOGIN_URL:   window.__WW_API_BASE__ + '/api/auth/login',
+  EMAIL_REGISTER_URL: window.__WW_API_BASE__ + '/api/auth/signup'
 };
 
 // ============= BACKEND API (listings persistence) =============
 // All listings are stored on the backend, NOT in localStorage.
 // localStorage is only used as an offline cache so the UI feels fast.
-// Switch API_BASE to any host (Render, Railway, Fly, your own VPS, etc.).
 window.WW_API = window.WW_API || {
-  API_BASE: 'https://walls-marketplace.onrender.com',
+  API_BASE: window.__WW_API_BASE__,
   // Endpoints (relative to API_BASE)
   LISTINGS:        '/api/listings',          // GET (list)  POST (create)
   LISTING_BY_ID:   '/api/listings/',         // + :id   PUT / DELETE

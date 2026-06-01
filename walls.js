@@ -574,6 +574,39 @@ window.WW_APP = {
     return out;
   },
 
+  _createListingCardImage: function(src, imgContainer, styleText) {
+    const resolved = this._resolveListingImages([src])[0] || src || '';
+    if (!resolved) return null;
+    const img = document.createElement('img');
+    img.loading = 'eager';
+    img.decoding = 'async';
+    img.fetchPriority = 'auto';
+    img.alt = '';
+    img.src = resolved;
+    img.dataset.primarySrc = resolved;
+    img.style.cssText = styleText;
+    img.addEventListener('error', function() {
+      const tried = Number(img.dataset.retryCount || '0');
+      if (tried < 1 && resolved) {
+        img.dataset.retryCount = String(tried + 1);
+        img.style.visibility = 'hidden';
+        const retrySrc = (/^(https?:)?\/\//i.test(resolved) || resolved.startsWith('/'))
+          ? resolved + (resolved.indexOf('?') === -1 ? '?' : '&') + '_ww_retry=' + Date.now()
+          : resolved;
+        window.setTimeout(function() {
+          img.src = retrySrc;
+        }, 180);
+        return;
+      }
+      img.style.display = 'none';
+      if (imgContainer) imgContainer.style.background = '#f0f0f0';
+    });
+    img.addEventListener('load', function() {
+      img.style.visibility = 'visible';
+    });
+    return img;
+  },
+
   _listingPropertyMetaSvg: {
     // FIX: use Font Awesome icons (bed for bedrooms, shower+tub for bathrooms)
     bed:  '<i class="fas fa-bed" aria-hidden="true" style="margin-right:4px;"></i>',
@@ -1377,7 +1410,12 @@ window.WW_APP = {
         } catch (_) {}
       })
       .catch(function(err) {
-        console.warn('Backend listings fetch failed (using cache):', err && err.message);
+        const msg = err && err.message ? String(err.message) : 'Request failed';
+        if (/aborted|signal is aborted/i.test(msg)) {
+          console.debug('Backend listings fetch aborted:', msg);
+          return;
+        }
+        console.warn('Backend listings fetch failed (using cache):', msg);
       });
   },
   
@@ -4162,17 +4200,13 @@ HOW TO USE THE APP:
     
     const hasImage = !!(listing.images && listing.images[0]);
     let img = null;
+    imgContainer.style.background = '#f0f0f0';
     if (hasImage) {
-      img = document.createElement('img');
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      img.fetchPriority = 'low';
-      img.src = listing.images[0];
-      img.alt = '';
-      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s; background:#f0f0f0;';
-      img.onerror = function() { this.style.display = 'none'; imgContainer.style.background = '#f0f0f0'; };
-    } else {
-      imgContainer.style.background = '#f0f0f0';
+      img = this._createListingCardImage(
+        listing.images[0],
+        imgContainer,
+        'width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s; background:#f0f0f0;'
+      );
     }
     
     if (listing.isAd) {
@@ -4291,18 +4325,14 @@ HOW TO USE THE APP:
     
     const hasImage = !!(listing.images && listing.images[0]);
     let img = null;
+    imgContainer.style.background = '#f0f0f0';
     if (hasImage) {
-      img = document.createElement('img');
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      img.fetchPriority = 'low';
-      img.src = listing.images[0];
-      img.alt = '';
-      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; background:#f0f0f0;';
-      img.onerror = function() { this.style.display = 'none'; imgContainer.style.background = '#f0f0f0'; };
-      imgContainer.appendChild(img);
-    } else {
-      imgContainer.style.background = '#f0f0f0';
+      img = this._createListingCardImage(
+        listing.images[0],
+        imgContainer,
+        'width: 100%; height: 100%; object-fit: cover; background:#f0f0f0;'
+      );
+      if (img) imgContainer.appendChild(img);
     }
     
     if (listing.isAd) {

@@ -398,25 +398,28 @@ window.WW_APP = {
 
   adminUpdateListingOnBackend: function(listing) {
     const cfg = window.WW_API || {};
+    const self = this;
     if (!cfg.API_BASE || !listing || !this._isMongoId(listing.id)) return Promise.resolve(listing);
-    const payload = this._prepareBackendListingPayload(listing);
-    payload.isAd = !!listing.isAd;
-    payload.adminPriority = listing.adminPriority || 0;
-    payload.verificationStatus = listing.verificationStatus;
-    payload.bidEnabled = !!listing.bidEnabled;
-    payload.bids = listing.bids || [];
-    payload.bidEndTime = listing.bidEndTime;
-    payload.occupancyStatus = listing.occupancyStatus;
-    payload.status = listing.status || 'active';
-    return window._wwApi('/api/admin/listings/' + encodeURIComponent(listing.id), {
-      method: 'PUT', body: payload, timeout: 60000
-    }).then(res => {
-      const saved = res && (res.listing || res);
-      return this._normalizeListing(Object.assign({}, listing, saved || {}));
-    }).catch(err => {
-      console.warn('Admin listing update failed:', err && err.message);
-      showToast('Server update failed: ' + (err && err.message), 'error');
-      return listing;
+    return this._downscaleListingImagesInPlace(listing).then(function() {
+      const payload = self._prepareBackendListingPayload(listing);
+      payload.isAd = !!listing.isAd;
+      payload.adminPriority = listing.adminPriority || 0;
+      payload.verificationStatus = listing.verificationStatus;
+      payload.bidEnabled = !!listing.bidEnabled;
+      payload.bids = listing.bids || [];
+      payload.bidEndTime = listing.bidEndTime;
+      payload.occupancyStatus = listing.occupancyStatus;
+      payload.status = listing.status || 'active';
+      return window._wwApi('/api/admin/listings/' + encodeURIComponent(listing.id), {
+        method: 'PUT', body: payload, timeout: 60000
+      }).then(res => {
+        const saved = res && (res.listing || res);
+        return self._normalizeListing(Object.assign({}, listing, saved || {}));
+      }).catch(err => {
+        console.warn('Admin listing update failed:', err && err.message);
+        showToast('Server update failed: ' + (err && err.message), 'error');
+        return listing;
+      });
     });
   },
 
@@ -598,6 +601,57 @@ window.WW_APP = {
     if (listing.createdBy && email && String(listing.createdBy).toLowerCase() === email) return true;
     if (listing.contact && listing.contact.email && email && String(listing.contact.email).toLowerCase() === email) return true;
     return false;
+  },
+
+  // Downscale a data: URL image to a max edge of `maxEdge` px and re-encode
+  // as JPEG so it stays under MongoDB's 16MB doc limit AND transmits reliably
+  // to other devices. Returns a Promise<string> (data URL or original on fail).
+  _downscaleDataURL: function(dataUrl, maxEdge, quality) {
+    maxEdge = maxEdge || 1280;
+    quality = quality || 0.82;
+    return new Promise(function(resolve) {
+      try {
+        if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+          return resolve(dataUrl);
+        }
+        const img = new Image();
+        img.onload = function() {
+          try {
+            const w = img.naturalWidth || img.width;
+            const h = img.naturalHeight || img.height;
+            if (!w || !h) return resolve(dataUrl);
+            const scale = Math.min(1, maxEdge / Math.max(w, h));
+            const tw = Math.max(1, Math.round(w * scale));
+            const th = Math.max(1, Math.round(h * scale));
+            const canvas = document.createElement('canvas');
+            canvas.width = tw;
+            canvas.height = th;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, tw, th);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          } catch (_) { resolve(dataUrl); }
+        };
+        img.onerror = function() { resolve(dataUrl); };
+        img.src = dataUrl;
+      } catch (_) { resolve(dataUrl); }
+    });
+  },
+
+  // Downscale every data: URL in listing.images in place so the payload sent
+  // to the backend is small enough to persist + sync to other devices.
+  _downscaleListingImagesInPlace: function(listing) {
+    const self = this;
+    if (!listing || !Array.isArray(listing.images) || !listing.images.length) {
+      return Promise.resolve(listing);
+    }
+    const tasks = listing.images.map(function(src) {
+      if (typeof src !== 'string' || !src.startsWith('data:image/')) return Promise.resolve(src);
+      return self._downscaleDataURL(src, 1280, 0.82);
+    });
+    return Promise.all(tasks).then(function(out) {
+      listing.images = out;
+      return listing;
+    });
   },
 
   _prepareBackendListingPayload: function(listing) {
@@ -1372,6 +1426,7 @@ window.WW_APP = {
   // ---- Single-record REST helpers (used by create/update/delete flows) ----
   createListingOnBackend: function(listing) {
     const cfg = window.WW_API || {};
+    const self = this;
     if (!listing.clientId) listing.clientId = listing.id;
     if (!cfg.API_BASE) return Promise.resolve(Object.assign({}, listing, { _syncFailed: true }));
     if (!this._hasServerAuth()) {
@@ -1380,30 +1435,43 @@ window.WW_APP = {
         _syncError: 'Log in with your account (email/password) to sync listings to the server.'
       }));
     }
-    const payload = this._prepareBackendListingPayload(listing);
-    return window._wwApi(cfg.LISTINGS || '/api/listings', { method: 'POST', body: payload, timeout: 60000 })
-      .then(res => {
-        const saved = (res && (res.listing || res)) || {};
-        if (!saved.id) saved.id = saved.clientId || saved._id || listing.id;
-        if (!saved.clientId) saved.clientId = listing.clientId || listing.id;
-        if ((!saved.images || !saved.images.length) && listing.images && listing.images.length) {
-          saved.images = listing.images.slice();
-        }
-        return saved;
-      })
-      .catch(err => {
-        const msg = (err && err.message) || 'unknown error';
-        console.warn('Create listing failed (kept locally):', msg);
-        return Object.assign({}, listing, { _syncFailed: true, _syncError: msg });
-      });
+    return this._downscaleListingImagesInPlace(listing).then(function() {
+      const payload = self._prepareBackendListingPayload(listing);
+      return window._wwApi(cfg.LISTINGS || '/api/listings', { method: 'POST', body: payload, timeout: 60000 })
+        .then(res => {
+          const saved = (res && (res.listing || res)) || {};
+          if (!saved.id) saved.id = saved.clientId || saved._id || listing.id;
+          if (!saved.clientId) saved.clientId = listing.clientId || listing.id;
+          // Adopt the server's image URLs so every device renders the same source.
+          // Only fall back to local data URLs when the server returned nothing.
+          if (!Array.isArray(saved.images) || !saved.images.length) {
+            saved.images = (listing.images || []).slice();
+          }
+          return saved;
+        })
+        .catch(err => {
+          const msg = (err && err.message) || 'unknown error';
+          console.warn('Create listing failed (kept locally):', msg);
+          return Object.assign({}, listing, { _syncFailed: true, _syncError: msg });
+        });
+    });
   },
   updateListingOnBackend: function(listing) {
     const cfg = window.WW_API || {};
+    const self = this;
     if (!cfg.API_BASE || !listing || !listing.id) return Promise.resolve(listing);
-    return window._wwApi((cfg.LISTING_BY_ID || '/api/listings/') + encodeURIComponent(listing.id),
-      { method: 'PUT', body: this._prepareBackendListingPayload(listing), timeout: 60000 })
-      .then(res => (res && (res.listing || res)) || listing)
-      .catch(err => { console.warn('Update listing failed:', err && err.message); return listing; });
+    return this._downscaleListingImagesInPlace(listing).then(function() {
+      return window._wwApi((cfg.LISTING_BY_ID || '/api/listings/') + encodeURIComponent(listing.id),
+        { method: 'PUT', body: self._prepareBackendListingPayload(listing), timeout: 60000 })
+        .then(res => {
+          const saved = (res && (res.listing || res)) || listing;
+          if (saved && Array.isArray(saved.images) && saved.images.length) {
+            listing.images = saved.images.slice();
+          }
+          return saved;
+        })
+        .catch(err => { console.warn('Update listing failed:', err && err.message); return listing; });
+    });
   },
   deleteListingOnBackend: function(listingId) {
     const cfg = window.WW_API || {};
@@ -5749,7 +5817,115 @@ HOW TO USE THE APP:
     } else {
       this.showFilteredListings(filtered, 'Filtered', false);
     }
+
+    // If the user actually searched/filtered and got zero results,
+    // offer to be notified when a matching listing is posted.
+    const hasActiveQuery =
+      !!(this.searchTerm && this.searchTerm.trim()) ||
+      (this.filters && (
+        (this.filters.location && this.filters.location !== 'Anywhere') ||
+        (this.filters.price && this.filters.price !== 'Any price') ||
+        (this.filters.type && this.filters.type !== 'All types')
+      )) ||
+      !!this.currentCategory;
+    if (!filtered.length && hasActiveQuery) {
+      this.showNotifyMePopup({
+        searchTerm: this.searchTerm || '',
+        location: (this.filters && this.filters.location) || '',
+        priceRange: (this.filters && this.filters.price) || '',
+        type: (this.filters && this.filters.type) || '',
+        category: this.currentCategory ? this.currentCategory.label : ''
+      });
+    }
   },
+
+  // "Notify me when a listing is available" popup, shown after a search /
+  // filter returns no results. Stores the request locally and (best-effort)
+  // POSTs to the backend so admins can act on it.
+  showNotifyMePopup: function(criteria) {
+    criteria = criteria || {};
+    // Throttle: don't re-open within 5s for the same query
+    const key = JSON.stringify(criteria);
+    const now = Date.now();
+    if (this._lastNotifyKey === key && (now - (this._lastNotifyAt || 0)) < 5000) return;
+    this._lastNotifyKey = key; this._lastNotifyAt = now;
+    if (document.querySelector('.ww-notify-modal')) return;
+
+    const summaryParts = [];
+    if (criteria.category)   summaryParts.push(criteria.category);
+    if (criteria.searchTerm) summaryParts.push('"' + criteria.searchTerm + '"');
+    if (criteria.location && criteria.location !== 'Anywhere') summaryParts.push('in ' + criteria.location);
+    if (criteria.priceRange && criteria.priceRange !== 'Any price') summaryParts.push(criteria.priceRange);
+    if (criteria.type && criteria.type !== 'All types') summaryParts.push(criteria.type);
+    const summary = summaryParts.length ? summaryParts.join(' • ') : 'this search';
+
+    const user = this.user || {};
+    const defaultEmail = user.email || '';
+    const defaultPhone = (user.phone || (user.contact && user.contact.phone)) || '';
+
+    const modal = document.createElement('div');
+    modal.className = 'modal ww-notify-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;z-index:10000;padding:16px;';
+    modal.innerHTML =
+      '<div class="modal-content" style="max-width:440px;width:100%;background:#fff;border-radius:14px;padding:22px;box-shadow:0 20px 50px rgba(0,0,0,0.25);">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;">' +
+          '<div>' +
+            '<h3 style="margin:0 0 4px;font-size:18px;color:#222;">No listings match — yet</h3>' +
+            '<p style="margin:0;color:#555;font-size:13px;">Get notified the moment one is posted for <strong>' + summary.replace(/</g,'&lt;') + '</strong>.</p>' +
+          '</div>' +
+          '<button type="button" class="ww-notify-close" aria-label="Close" style="background:none;border:none;font-size:22px;color:#888;cursor:pointer;line-height:1;">&times;</button>' +
+        '</div>' +
+        '<label style="display:block;font-size:12px;font-weight:600;color:#333;margin:14px 0 4px;">Email</label>' +
+        '<input type="email" class="ww-notify-email" placeholder="you@example.com" value="' + defaultEmail.replace(/"/g,'&quot;') + '" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;" />' +
+        '<label style="display:block;font-size:12px;font-weight:600;color:#333;margin:12px 0 4px;">Phone (optional)</label>' +
+        '<input type="tel" class="ww-notify-phone" placeholder="+263…" value="' + defaultPhone.replace(/"/g,'&quot;') + '" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;" />' +
+        '<div style="display:flex;gap:10px;margin-top:18px;">' +
+          '<button type="button" class="btn btn-outline ww-notify-skip" style="flex:1;padding:10px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer;">Not now</button>' +
+          '<button type="button" class="btn btn-primary ww-notify-submit" style="flex:1;padding:10px;border-radius:8px;border:none;background:var(--primary,#2E7D32);color:#fff;cursor:pointer;font-weight:600;">Notify me</button>' +
+        '</div>' +
+      '</div>';
+
+    document.body.appendChild(modal);
+    const close = () => { if (modal && modal.parentNode) modal.parentNode.removeChild(modal); };
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    modal.querySelector('.ww-notify-close').addEventListener('click', close);
+    modal.querySelector('.ww-notify-skip').addEventListener('click', close);
+    modal.querySelector('.ww-notify-submit').addEventListener('click', () => {
+      const email = (modal.querySelector('.ww-notify-email').value || '').trim();
+      const phone = (modal.querySelector('.ww-notify-phone').value || '').trim();
+      if (!email && !phone) {
+        showToast('Add an email or phone number first', 'warning');
+        return;
+      }
+      const request = {
+        id: 'notif_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        criteria: criteria,
+        email: email,
+        phone: phone,
+        userId: this._getCurrentUserId(),
+        userName: user.name || '',
+        createdAt: new Date().toISOString()
+      };
+      // Local persistence so it survives reloads + visible to admin UI
+      try {
+        const key = 'ww_notify_requests';
+        const arr = JSON.parse(localStorage.getItem(key) || '[]');
+        arr.push(request);
+        localStorage.setItem(key, JSON.stringify(arr));
+      } catch (_) {}
+      // Best-effort backend POST (silently ignored if endpoint not present)
+      try {
+        const cfg = window.WW_API || {};
+        if (cfg.API_BASE && typeof window._wwApi === 'function') {
+          window._wwApi('/api/notify-requests', { method: 'POST', body: request, timeout: 15000 })
+            .catch(() => {});
+        }
+      } catch (_) {}
+      close();
+      showToast("Got it — we'll let you know when something matches.", 'success');
+    });
+  },
+
   
   showAdvancedFilters: function() {
     const modal = document.createElement('div');
@@ -5847,6 +6023,15 @@ HOW TO USE THE APP:
       this.filteredListings = filtered;
       this.showFilteredListings(filtered, 'Advanced Filter', false);
       modal.remove();
+      if (!filtered.length) {
+        this.showNotifyMePopup({
+          searchTerm: this.searchTerm || '',
+          location: (this.filters && this.filters.location) || '',
+          priceRange: 'min ' + (minPrice || '0') + ' / max ' + (maxPrice || 'any'),
+          type: (this.filters && this.filters.type) || '',
+          category: this.currentCategory ? this.currentCategory.label : ''
+        });
+      }
     });
     
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });

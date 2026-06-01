@@ -394,19 +394,31 @@ function s3KeyFromUrl(url) {
 }
 
 async function uploadBase64ToS3(base64String, userId) {
-  if (!S3_BUCKET) throw new Error('S3 not configured');
+  // Fallback: when S3 isn't configured, persist the data URL itself in MongoDB
+  // so every device can render the image (instead of dropping it silently).
+  if (!S3_BUCKET) return base64String;
   const matches = base64String.match(/^data:image\/([A-Za-z0-9+\-.]+);base64,(.+)$/);
-  if (!matches) throw new Error('invalid base64 image');
+  if (!matches) {
+    // Not a data URL — return as-is so callers can store http(s) URLs unchanged.
+    return base64String;
+  }
   const ext    = matches[1].split('/').pop() || 'png';
   const buffer = Buffer.from(matches[2], 'base64');
   const key    = `listings/${userId}/${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
-  await s3.send(new PutObjectCommand({
-    Bucket: S3_BUCKET,
-    Key: key,
-    Body: buffer,
-    ContentType: `image/${ext}`,
-  }));
-  return s3PublicUrl(key);
+  try {
+    await s3.send(new PutObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: key,
+      Body: buffer,
+      ContentType: `image/${ext}`,
+    }));
+    return s3PublicUrl(key);
+  } catch (err) {
+    // S3 PUT failed at runtime — fall back to inline data URL so images still
+    // sync across devices instead of vanishing.
+    console.warn('[s3] PUT failed, falling back to inline base64:', err.message);
+    return base64String;
+  }
 }
 
 // ---------------------------------------------------------------------------

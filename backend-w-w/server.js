@@ -193,6 +193,16 @@ const SavedSearchSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 }, { versionKey: false });
 
+const NotifyRequestSchema = new mongoose.Schema({
+  userId   : { type: mongoose.Schema.Types.Mixed, index: true },
+  userName : { type: String, default: '' },
+  email    : { type: String, default: '' },
+  phone    : { type: String, default: '' },
+  criteria : { type: mongoose.Schema.Types.Mixed, default: {} },
+  status   : { type: String, default: 'open', index: true },
+  createdAt: { type: Date, default: Date.now, index: true },
+}, { versionKey: false });
+
 const PushSubscriptionSchema = new mongoose.Schema({
   userId   : { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
   endpoint : { type: String, unique: true, required: true },
@@ -223,6 +233,7 @@ const MessageSchema = new mongoose.Schema({
 const User             = mongoose.model('User',             UserSchema);
 const Listing          = mongoose.model('Listing',          ListingSchema);
 const SavedSearch      = mongoose.model('SavedSearch',      SavedSearchSchema);
+const NotifyRequest    = mongoose.model('NotifyRequest',    NotifyRequestSchema);
 const PushSubscription = mongoose.model('PushSubscription', PushSubscriptionSchema);
 const Notification     = mongoose.model('Notification',     NotificationSchema);
 const Message          = mongoose.model('Message',          MessageSchema);
@@ -945,6 +956,25 @@ app.put('/api/saved-searches/:id', authRequired, async (req, res) => {
 app.delete('/api/saved-searches/:id', authRequired, async (req, res) => {
   const r = await SavedSearch.deleteOne({ _id: req.params.id, userId: req.user.id });
   res.json({ ok: r.deletedCount > 0 });
+});
+
+app.post('/api/notify-requests', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const email = String(body.email || '').trim().toLowerCase();
+    const phone = String(body.phone || '').trim();
+    if (!email && !phone) return res.status(400).json({ error: 'email or phone required' });
+    const doc = await NotifyRequest.create({
+      userId  : body.userId || null,
+      userName: String(body.userName || '').slice(0, 160),
+      email,
+      phone,
+      criteria: (body.criteria && typeof body.criteria === 'object') ? body.criteria : {},
+      status  : 'open',
+      createdAt: body.createdAt ? new Date(body.createdAt) : new Date(),
+    });
+    res.json({ ok: true, id: doc._id.toString() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ---------------------------------------------------------------------------

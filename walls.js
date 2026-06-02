@@ -8,23 +8,80 @@ window.WW_APP = window.WW_APP || {};
 //   - POST EMAIL_LOGIN_URL    body { email, password } -> returns { user: {...} } on 200
 //   - POST EMAIL_REGISTER_URL body { name, email, phone, password } -> returns { user: {...} } on 200
 // Optionally set GOOGLE_VERIFY_URL to a backend that validates the Google id_token.
-// Auto-detect backend host: use same-origin when the page is served from the
-// production domain (wallsmarketplace.co.zw or its www variant) so the API
-// works regardless of where the backend is actually hosted. Falls back to the
-// Render URL only when opened from file:// or an unrelated origin.
+// Auto-detect backend host. The custom domain currently serves the frontend,
+// while the working API lives on Render, so probe candidates and persist the
+// first healthy backend instead of assuming same-origin forever.
 (function(){
-  var apiBase = 'https://wallsmarketplace.co.zw';
+  var DEFAULT_LIVE_API = 'https://walls-marketplace.onrender.com';
+  var initialBase = DEFAULT_LIVE_API;
+  var cachedBase = '';
+  try { cachedBase = localStorage.getItem('ww_api_base') || sessionStorage.getItem('ww_api_base') || ''; } catch (_) {}
   try {
     var h = (location && location.hostname) ? location.hostname.toLowerCase() : '';
-    if (h === 'wallsmarketplace.co.zw' || h === 'www.wallsmarketplace.co.zw') {
-      apiBase = location.origin; // same-origin, avoids CORS + DNS issues
-    } else if (h && h !== 'localhost' && h !== '127.0.0.1' && !/^file:/i.test(location.protocol)) {
-      // Any other live host (preview domains, custom domains): default to same-origin
-      apiBase = location.origin;
+    var origin = (location && location.origin && /^https?:/i.test(location.origin)) ? location.origin : '';
+    if ((h === 'wallsmarketplace.co.zw' || h === 'www.wallsmarketplace.co.zw') && origin) {
+      initialBase = origin;
+    } else if (origin && h && h !== 'localhost' && h !== '127.0.0.1' && !/^file:/i.test(location.protocol)) {
+      initialBase = origin;
     }
-  } catch (_) {}
-  window.__WW_API_BASE__ = apiBase;
+    window.__WW_API_CANDIDATES__ = [cachedBase, initialBase, origin, DEFAULT_LIVE_API].filter(function(v, i, arr) {
+      return !!v && arr.indexOf(v) === i;
+    });
+  } catch (_) {
+    window.__WW_API_CANDIDATES__ = [cachedBase, initialBase, DEFAULT_LIVE_API].filter(function(v, i, arr) {
+      return !!v && arr.indexOf(v) === i;
+    });
+  }
+  window.__WW_DEFAULT_API_BASE__ = DEFAULT_LIVE_API;
+  window.__WW_API_BASE__ = cachedBase || initialBase;
 })();
+
+window._wwApplyApiBase = function(base) {
+  if (!base) return '';
+  base = String(base).replace(/\/$/, '');
+  window.__WW_API_BASE__ = base;
+  window.WW_API = window.WW_API || {};
+  window.WW_API.API_BASE = base;
+  window.WW_OAUTH = window.WW_OAUTH || {};
+  window.WW_OAUTH.GOOGLE_VERIFY_URL = base + '/api/auth/google/verify';
+  window.WW_OAUTH.EMAIL_LOGIN_URL = base + '/api/auth/login';
+  window.WW_OAUTH.EMAIL_REGISTER_URL = base + '/api/auth/signup';
+  try { localStorage.setItem('ww_api_base', base); } catch (_) {}
+  try { sessionStorage.setItem('ww_api_base', base); } catch (_) {}
+  return base;
+};
+
+window._wwEnsureApiBase = function() {
+  if (window.__WW_API_READY__) return Promise.resolve(window.__WW_API_READY__);
+  if (window.__WW_API_DISCOVERY__) return window.__WW_API_DISCOVERY__;
+  window.__WW_API_DISCOVERY__ = (async function() {
+    var current = (window.WW_API && window.WW_API.API_BASE) || window.__WW_API_BASE__ || window.__WW_DEFAULT_API_BASE__;
+    var candidates = (window.__WW_API_CANDIDATES__ || []).slice();
+    if (current && candidates.indexOf(current) === -1) candidates.unshift(current);
+    for (var i = 0; i < candidates.length; i++) {
+      var candidate = String(candidates[i] || '').replace(/\/$/, '');
+      if (!candidate) continue;
+      try {
+        var r = await fetch(candidate + '/api/health', {
+          method: 'GET',
+          cache: 'no-store',
+          mode: 'cors',
+          credentials: 'omit'
+        });
+        if (!r.ok) continue;
+        var data = await r.json().catch(function() { return null; });
+        if (!data || data.ok === false) continue;
+        window.__WW_API_READY__ = window._wwApplyApiBase(candidate);
+        return window.__WW_API_READY__;
+      } catch (_) {}
+    }
+    window.__WW_API_READY__ = window._wwApplyApiBase(current || window.__WW_DEFAULT_API_BASE__);
+    return window.__WW_API_READY__;
+  })().finally(function() {
+    window.__WW_API_DISCOVERY__ = null;
+  });
+  return window.__WW_API_DISCOVERY__;
+};
 
 window.WW_OAUTH = window.WW_OAUTH || {
   GOOGLE_CLIENT_ID: '463654130792-2ct7p5m2556nnrtmpm3ocuj6rfa2tisl.apps.googleusercontent.com',
@@ -81,8 +138,12 @@ window._wwSetToken = function(token) {
 // Generic fetch wrapper with auth token + timeout
 window._wwApi = async function(path, opts) {
   opts = opts || {};
-  const base = (window.WW_API && window.WW_API.API_BASE) || '';
-  const url  = /^https?:/i.test(path) ? path : (base + path);
+  const base = /^https?:/i.test(path)
+    ? ''
+    : await ((typeof window._wwEnsureApiBase === 'function')
+      ? window._wwEnsureApiBase()
+      : Promise.resolve((window.WW_API && window.WW_API.API_BASE) || ''));
+  const url  = /^https?:/i.test(path) ? path : (String(base || '').replace(/\/$/, '') + path);
   const headers = Object.assign(
     { 'Content-Type': 'application/json', 'Accept': 'application/json' },
     opts.headers || {}
@@ -125,18 +186,19 @@ window._wwApi = async function(path, opts) {
 // Warm up the backend (free-tier hosts sleep) so the first real request is fast.
 window._wwWarmBackend = function() {
   try {
-    const base = (window.WW_API && window.WW_API.API_BASE) || '';
-    if (!base) return;
-    fetch(base + (window.WW_API.HEALTH || '/'), { method: 'GET', mode: 'cors', cache: 'no-store' })
-      .catch(() => {});
+    Promise.resolve(typeof window._wwEnsureApiBase === 'function' ? window._wwEnsureApiBase() : ((window.WW_API && window.WW_API.API_BASE) || ''))
+      .then(function(base) {
+        if (!base) return;
+        fetch(String(base).replace(/\/$/, '') + (window.WW_API.HEALTH || '/api/health'), {
+          method: 'GET', mode: 'cors', cache: 'no-store', credentials: 'omit'
+        }).catch(function() {});
+      });
   } catch (_) {}
 };
 // Fire warm-up as soon as this script loads.
 window._wwWarmBackend();
 try {
-  if (window.WW_API && window.WW_API.API_BASE) {
-    window._wwStorage.set('ww_api_base', window.WW_API.API_BASE);
-  }
+  if (window.WW_API && window.WW_API.API_BASE) window._wwApplyApiBase(window.WW_API.API_BASE);
 } catch (_) {}
 
 // Lazy script loader
@@ -640,7 +702,7 @@ window.WW_APP = {
   },
 
   _hasServerAuth: function() {
-    return !!(window._wwGetToken() && this._getCurrentUserId() && !String(this._getCurrentUserId()).startsWith('user_'));
+    return !!(window._wwGetToken() && this._getCurrentUserId());
   },
 
   _listingBelongsToCurrentUser: function(listing) {
@@ -740,6 +802,10 @@ window.WW_APP = {
     const style = document.createElement('style');
     style.id = 'ww-listing-layout-styles';
     style.textContent = `
+      html, body { max-width: 100%; overflow-x: hidden; }
+      body { -webkit-text-size-adjust: 100%; }
+      *, *::before, *::after { box-sizing: border-box; }
+      img { max-width: 100%; }
       #listingsGrid { width: 100%; overflow-x: hidden; }
       .category-section-horizontal { margin: 8px 0 22px; padding: 0 12px; width: 100%; overflow: hidden; }
       .category-header-horizontal { display:flex; align-items:center; justify-content:space-between; margin: 0 0 10px; padding: 0 4px; }
@@ -752,12 +818,23 @@ window.WW_APP = {
       .category-selected-grid .listing-card { width:100% !important; margin:0 !important; flex:none !important; }
       .saved-listings-grid { display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:14px; margin: 12px; align-items:start; }
       .saved-listings-grid .listing-card { width:100% !important; margin:0 !important; flex:none !important; }
+      .listing-card, .listing-card.mobile { min-width: 0; }
+      .listing-card-title, .listing-posted, .listing-property-meta, .meta-item { min-width: 0; }
+      .listing-image, .listing-image img { transform: translateZ(0); backface-visibility: hidden; }
+      .listing-image img { display:block; }
       @media (max-width: 768px) {
+        body { overflow-x: hidden !important; }
+        #appView, #landingView, #sellerView, #adminView, .app-container, .content-wrapper, .main-content { width:100%; max-width:100%; overflow-x:hidden; }
         .category-section-horizontal { padding: 0 8px; margin-bottom: 18px; }
         .horizontal-listings-grid { gap:10px; }
-        .horizontal-listings-grid .listing-card.mobile { width: calc((100vw - 38px) / 2) !important; flex: 0 0 calc((100vw - 38px) / 2) !important; }
+        .horizontal-listings-grid .listing-card.mobile { width: calc((100vw - 28px) / 2) !important; flex: 0 0 calc((100vw - 28px) / 2) !important; }
         .category-selected-grid, .saved-listings-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin:10px 8px 18px; }
         .category-selected-grid .listing-card.mobile, .saved-listings-grid .listing-card.mobile { width:100% !important; }
+        .listing-card.mobile { margin: 0 !important; }
+        .listing-card.mobile .listing-image { height: 124px !important; border-radius: 8px !important; }
+        .listing-card.mobile .listing-card-title { font-size: 13px !important; line-height: 1.25 !important; }
+        .listing-card.mobile .listing-posted { font-size: 10px !important; }
+        .modal .modal-content { width:min(94vw, 460px) !important; max-height:88vh; overflow:auto; }
       }
       @media (min-width: 769px) {
         .horizontal-listings-grid .listing-card { width:240px !important; flex: 0 0 240px !important; }
@@ -1180,7 +1257,7 @@ window.WW_APP = {
       if (userData) {
         this.user = JSON.parse(userData);
         const tok = window._wwGetToken();
-        if (tok && this.user && !this.user.authToken) this.user.authToken = tok;
+        if (tok && this.user) this.user.authToken = tok;
         this.updateUserMenu();
       }
     } catch (e) {
@@ -1345,7 +1422,9 @@ window.WW_APP = {
     // 2) Async backend fetch -> overwrite cache + re-render
     const self = this;
     const cfg = window.WW_API || {};
-    if (!cfg.API_BASE) return;
+    if (typeof window._wwEnsureApiBase === 'function') {
+      window._wwEnsureApiBase().catch(function() {});
+    }
     // Ask for a generous page so newly-created listings are not hidden by
     // the default 20-item limit.
     const url = (cfg.LISTINGS || '/api/listings') + '?limit=200&sort=new';
@@ -1414,6 +1493,9 @@ window.WW_APP = {
         if (/aborted|signal is aborted/i.test(msg)) {
           console.debug('Backend listings fetch aborted:', msg);
           return;
+        }
+        if (err && err.status === 404 && typeof window._wwEnsureApiBase === 'function') {
+          window._wwEnsureApiBase().catch(function() {});
         }
         console.warn('Backend listings fetch failed (using cache):', msg);
       });
@@ -5886,6 +5968,17 @@ HOW TO USE THE APP:
     }
   },
 
+  triggerSearchNotifyPopup: function(extraCriteria) {
+    const criteria = Object.assign({
+      searchTerm: this.searchTerm || '',
+      location: (this.filters && this.filters.location) || '',
+      priceRange: (this.filters && this.filters.price) || '',
+      type: (this.filters && this.filters.type) || '',
+      category: this.currentCategory ? this.currentCategory.label : ''
+    }, extraCriteria || {});
+    this.showNotifyMePopup(criteria);
+  },
+
   // "Notify me when a listing is available" popup, shown after a search /
   // filter returns no results. Stores the request locally and (best-effort)
   // POSTs to the backend so admins can act on it.
@@ -5956,9 +6049,9 @@ HOW TO USE THE APP:
       // Local persistence so it survives reloads + visible to admin UI
       try {
         const key = 'ww_notify_requests';
-        const arr = JSON.parse(localStorage.getItem(key) || '[]');
+        const arr = JSON.parse(window._wwStorage.get(key) || '[]');
         arr.push(request);
-        localStorage.setItem(key, JSON.stringify(arr));
+        window._wwStorage.set(key, JSON.stringify(arr));
       } catch (_) {}
       // Best-effort backend POST (silently ignored if endpoint not present)
       try {
@@ -6087,6 +6180,9 @@ HOW TO USE THE APP:
   handleSearch: function(e) {
     this.searchTerm = e.target.value;
     this.applyFilters();
+    if (!this.filteredListings.length && (this.searchTerm || '').trim()) {
+      this.triggerSearchNotifyPopup();
+    }
   },
   
   loadMoreListings: function() {
@@ -6094,6 +6190,7 @@ HOW TO USE THE APP:
   },
   
   handleResize: function() {
+    try { this.ensureListingLayoutStyles(); } catch (_) {}
     if (this.currentView === 'app') {
       if (this.currentCategory) {
         const filtered = this.listings.filter(listing => listing.category === this.currentCategory.key);
@@ -6382,6 +6479,19 @@ HOW TO USE THE APP:
           const data = await r.json();
           serverUser = data.user || data;
           if (data.token) window._wwSetToken(data.token);
+        } else if ((r.status === 404 || r.status >= 500) && typeof window._wwEnsureApiBase === 'function') {
+          await window._wwEnsureApiBase();
+          const retryUrl = provider === 'google' ? (window.WW_OAUTH && window.WW_OAUTH.GOOGLE_VERIFY_URL) : verifyUrl;
+          const retry = await fetch(retryUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token, profile: profile })
+          });
+          if (retry.ok) {
+            const data2 = await retry.json();
+            serverUser = data2.user || data2;
+            if (data2.token) window._wwSetToken(data2.token);
+          }
         }
       } catch (e) {
         console.warn('Social backend verify failed, falling back to local:', e);
@@ -6412,6 +6522,12 @@ HOW TO USE THE APP:
       };
       this.allUsers.push(user);
     } else {
+      if (serverUser && (serverUser.id || serverUser._id)) {
+        user.id = serverUser.id || serverUser._id;
+      }
+      if (serverUser && serverUser.email) user.email = serverUser.email;
+      if (serverUser && serverUser.name) user.name = serverUser.name;
+      if (serverUser && serverUser.phone) user.phone = serverUser.phone;
       user.provider = provider;
       if (!user.avatar && profile.picture) {
         user.avatar = profile.picture.data ? profile.picture.data.url : profile.picture;
@@ -7543,6 +7659,9 @@ HOW TO USE THE APP:
     this._installCustomInstallButton();
     this._wrapToggleLike();
     this._wrapSaveCurrentSearch();
+    if (typeof window._wwEnsureApiBase === 'function') {
+      window._wwEnsureApiBase().catch(function() {});
+    }
     if (this.user) {
       this.loadLikesFromServer();
       this.loadSavedSearchesFromServer();
@@ -7625,6 +7744,9 @@ HOW TO USE THE APP:
       if (_origUpdateUserMenu) {
         window.WW_APP.updateUserMenu = function() {
           const r = _origUpdateUserMenu.apply(this, arguments);
+          if (typeof window._wwEnsureApiBase === 'function') {
+            window._wwEnsureApiBase().catch(function() {});
+          }
           if (this.user && this._hasServerAuth()) {
             try { this.loadLikesFromServer(); } catch(_) {}
             try { this.loadSavedSearchesFromServer(); } catch(_) {}

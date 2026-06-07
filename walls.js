@@ -831,36 +831,49 @@ window.WW_APP = {
       /* Disclaimer removed app-wide */
       .footer-disclaimer { display: none !important; }
 
-      /* Bottom nav: keep base look from styles.css, but pin it to the
-         bottom of the viewport and make sure it never gets pushed off
-         the left edge or clipped on narrow screens. */
+      /* Bottom nav: Instagram-style floating pill. Always visible, centered,
+         compact, and pinned to the viewport so navigation can never push it
+         off-screen. */
       .bottom-nav {
         position: fixed !important;
         left: 50% !important;
         right: auto !important;
-        bottom: 0 !important;
+        top: auto !important;
+        bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
         transform: translateX(-50%) !important;
-        width: min(96vw, 520px) !important;
-        max-width: 96vw !important;
+        width: min(94vw, 460px) !important;
+        max-width: 94vw !important;
         margin: 0 auto !important;
         box-sizing: border-box !important;
-        z-index: 9999 !important;
+        z-index: 2147483000 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-around !important;
+        gap: 2px !important;
+        padding: 6px 10px !important;
+        border-radius: 999px !important;
+        background: var(--nav-bg, rgba(28,28,30,0.92)) !important;
+        backdrop-filter: saturate(180%) blur(18px) !important;
+        -webkit-backdrop-filter: saturate(180%) blur(18px) !important;
+        border: 1px solid var(--border-color, rgba(255,255,255,0.08)) !important;
+        box-shadow: 0 10px 32px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.18) !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        transition: none !important;
       }
+      .bottom-nav.hidden, .bottom-nav[hidden] { display: flex !important; }
 
       @media (max-width: 768px) {
         html, body { overscroll-behavior-x: none !important; overscroll-behavior-y: auto !important; }
         body { overflow-x: hidden !important; }
         #appView, #landingView, #sellerView, #adminView, .app-container, .content-wrapper, .main-content { width:100%; max-width:100%; overflow-x:hidden; }
         .bottom-nav {
-          width: 94vw !important;
-          max-width: 94vw !important;
-          left: 50% !important;
-          right: auto !important;
-          transform: translateX(-50%) !important;
-          padding-left: 4px !important;
-          padding-right: 4px !important;
+          width: min(94vw, 420px) !important;
+          bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
         }
         .bottom-nav-tab, .bottom-nav-search { min-width: 0 !important; flex: 1 1 0 !important; }
+
         .category-section-horizontal { padding: 0 8px; margin-bottom: 18px; }
         .horizontal-listings-grid { gap:10px; }
         .horizontal-listings-grid .listing-card.mobile { width: calc((100vw - 28px) / 2) !important; flex: 0 0 calc((100vw - 28px) / 2) !important; }
@@ -7805,8 +7818,21 @@ HOW TO USE THE APP:
       '--brand': '#B87333',
       '--nav-bg': '#241D18', '--nav-active-bg': '#B87333', '--nav-active-fg': '#FFFFFF',
       '--nav-inactive-fg': '#B8A99A'
+    },
+    instagram: {
+      '--primary': '#E1306C', '--primary-dark': '#C13584',
+      '--primary-soft': 'rgba(225,48,108,0.18)',
+      '--bg': '#000000', '--surface': '#101010', '--surface-2': '#1C1C1E',
+      '--card': '#121212', '--text': '#FFFFFF', '--text-muted': '#A8A8A8',
+      '--border-color': 'rgba(255,255,255,0.10)',
+      '--brand': '#E1306C',
+      '--nav-bg': 'rgba(20,20,22,0.92)',
+      '--nav-active-bg': 'rgba(255,255,255,0.14)',
+      '--nav-active-fg': '#FFFFFF',
+      '--nav-inactive-fg': 'rgba(255,255,255,0.78)'
     }
   },
+
   applyTheme: function(name) {
     const t = this.themes[name] || this.themes.beige;
     const root = document.documentElement;
@@ -7837,10 +7863,12 @@ HOW TO USE THE APP:
           <button data-x style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted,#888);">&times;</button>
         </div>
         ${[
-          { k:'beige',  label:'Warm Beige',                    swatches:['#C8B897','#A89B7A','#fafafa','#333333'] },
-          { k:'navy',   label:'Deep Navy + Gold',              swatches:['#0F1A2A','#1A2A3A','#C8A84E','#F8F9FA'] },
-          { k:'copper', label:'Charcoal + Copper / Rose Gold', swatches:['#2B2B2B','#B87333','#D4A373','#FDFBF7'] }
+          { k:'beige',     label:'Warm Beige',                    swatches:['#C8B897','#A89B7A','#fafafa','#333333'] },
+          { k:'navy',      label:'Deep Navy + Gold',              swatches:['#0F1A2A','#1A2A3A','#C8A84E','#F8F9FA'] },
+          { k:'copper',    label:'Charcoal + Copper / Rose Gold', swatches:['#2B2B2B','#B87333','#D4A373','#FDFBF7'] },
+          { k:'instagram', label:'Instagram Dark',                swatches:['#000000','#1C1C1E','#E1306C','#F5F5F5'] }
         ].map(t => `
+
           <button data-t="${t.k}" style="display:flex;align-items:center;gap:14px;width:100%;padding:12px;margin-bottom:10px;border:2px solid ${cur===t.k?'var(--primary,#C8A84E)':'var(--border-color,#eee)'};border-radius:12px;background:var(--surface,#fff);color:var(--text,#222);cursor:pointer;text-align:left;">
             <div style="display:flex;gap:4px;">
               ${t.swatches.map(s => `<span style="width:22px;height:22px;border-radius:6px;background:${s};display:inline-block;border:1px solid rgba(0,0,0,.06);"></span>`).join('')}

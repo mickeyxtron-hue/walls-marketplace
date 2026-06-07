@@ -77,6 +77,12 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '*';
 const VAPID_PUBLIC_KEY  = process.env.VAPID_PUBLIC_KEY  || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_SUBJECT     = process.env.VAPID_SUBJECT     || 'mailto:admin@example.com';
+
+// Super admin: hard-coded email that always has full admin powers and can
+// promote/demote/block/delete other admins. Override with env if needed.
+// Defaults to the account currently seeded on the frontend (mickeyxtron@gmail.com).
+const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || 'mickeyxtron@gmail.com').toLowerCase();
+console.log('[admin] SUPER_ADMIN_EMAIL =', SUPER_ADMIN_EMAIL);
 const PUSH_ENABLED      = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 if (PUSH_ENABLED) {
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
@@ -151,6 +157,7 @@ const UserSchema = new mongoose.Schema({
   provider   : { type: String, default: 'local' },
   language   : { type: String, default: 'en' },
   isAdmin    : { type: Boolean, default: false },
+  isBlocked  : { type: Boolean, default: false },
   lastLoginAt: { type: Date },
   createdAt  : { type: Date, default: Date.now },
 }, { versionKey: false });
@@ -295,6 +302,8 @@ function tryParseJson(s, fallback) {
 function publicUser(u) {
   if (!u) return null;
   const o = u.toObject ? u.toObject() : u;
+  const emailLc = (o.email || '').toLowerCase();
+  const isSuper = !!SUPER_ADMIN_EMAIL && emailLc === SUPER_ADMIN_EMAIL;
   return {
     id      : o._id?.toString?.() || o.id,
     email   : o.email,
@@ -303,14 +312,19 @@ function publicUser(u) {
     avatar  : o.avatar || '',
     provider: o.provider || 'local',
     language: o.language || 'en',
-    isAdmin : !!o.isAdmin,
+    isAdmin : !!o.isAdmin || isSuper,
+    isSuperAdmin: isSuper,
+    isBlocked: !!o.isBlocked,
   };
 }
 
 async function userIsAdmin(userId) {
   if (!userId) return false;
   const u = await User.findById(userId).lean();
-  return !!(u && u.isAdmin);
+  if (!u) return false;
+  if (u.isAdmin) return true;
+  // Super admin is always admin even if isAdmin flag was wiped manually.
+  return !!SUPER_ADMIN_EMAIL && (u.email || '').toLowerCase() === SUPER_ADMIN_EMAIL;
 }
 
 function publicListing(doc, viewerId) {
@@ -458,10 +472,14 @@ app.get('/api/user', authRequired, async (req, res) => {
 async function handleAuthLogin(req, res) {
   try {
     const { email, password } = req.body || {};
-    const user = await User.findOne({ email: String(email || '').toLowerCase() });
+    const emailLc = String(email || '').toLowerCase();
+    const user = await User.findOne({ email: emailLc });
     if (!user || !user.password) return res.status(401).json({ error: 'invalid credentials' });
     const ok = await bcrypt.compare(String(password || ''), user.password);
     if (!ok) return res.status(401).json({ error: 'invalid credentials' });
+    // Auto-promote super admin every login so the flag can never get out of sync.
+    if (emailLc === SUPER_ADMIN_EMAIL && !user.isAdmin) user.isAdmin = true;
+    if (user.isBlocked) return res.status(403).json({ error: 'account blocked' });
     user.lastLoginAt = new Date();
     await user.save();
     res.json({ token: signToken(user), user: publicUser(user) });
@@ -475,14 +493,16 @@ async function handleAuthSignup(req, res) {
   try {
     const { email, password, name, phone } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'email + password required' });
-    const exists = await User.findOne({ email: String(email).toLowerCase() });
+    const emailLc = String(email).toLowerCase();
+    const exists = await User.findOne({ email: emailLc });
     if (exists) return res.status(409).json({ error: 'email already registered' });
     const hash = await bcrypt.hash(String(password), 10);
     const user = await User.create({
-      email: String(email).toLowerCase(),
+      email: emailLc,
       password: hash,
       name: name || '',
       phone: phone || '',
+      isAdmin: emailLc === SUPER_ADMIN_EMAIL,
       lastLoginAt: new Date(),
     });
     res.json({ token: signToken(user), user: publicUser(user) });
@@ -496,14 +516,18 @@ app.post('/api/auth/oauth', async (req, res) => {
   try {
     const { provider, email, name, avatar } = req.body || {};
     if (!email) return res.status(400).json({ error: 'email required' });
-    let user = await User.findOne({ email: String(email).toLowerCase() });
+    const emailLc = String(email).toLowerCase();
+    let user = await User.findOne({ email: emailLc });
     if (!user) {
       user = await User.create({
-        email   : String(email).toLowerCase(),
+        email   : emailLc,
         name    : name   || '',
         avatar  : avatar || '',
         provider: provider || 'oauth',
+        isAdmin : emailLc === SUPER_ADMIN_EMAIL,
       });
+    } else if (emailLc === SUPER_ADMIN_EMAIL && !user.isAdmin) {
+      user.isAdmin = true;
     }
     user.lastLoginAt = new Date();
     await user.save();
@@ -592,12 +616,30 @@ app.get('/api/listings', authOptional, async (req, res) => {
     else if (ownerId) where.ownerId = ownerId;
 
     const sortMap = {
-      new      : { createdAt: -1 },
+      new      : { adminPriority: -1, isAd: -1, likeCount: -1, createdAt: -1 },
       old      : { createdAt:  1 },
       priceAsc : { price:      1 },
       priceDesc: { price:     -1 },
-      popular  : { views:     -1 },
+      popular  : { likeCount: -1, views: -1 },
     };
+
+    // Use aggregation when default sort so we can rank by adminPriority (in fields),
+    // isAd (in fields), and likeCount (size of likedBy[]) all at once.
+    if (!sort || sort === 'new') {
+      const pipeline = [
+        { $match: where },
+        { $addFields: {
+            _priority : { $ifNull: [ '$fields.adminPriority', 0 ] },
+            _isAd     : { $cond: [ { $eq: [ '$fields.isAd', true ] }, 1, 0 ] },
+            _likeCount: { $size: { $ifNull: [ '$likedBy', [] ] } },
+        } },
+        { $sort: { _priority: -1, _isAd: -1, _likeCount: -1, createdAt: -1 } },
+        { $skip: Number(skip) || 0 },
+        { $limit: Math.min(Number(limit) || 100, 500) },
+      ];
+      const docs = await Listing.aggregate(pipeline);
+      return res.json(docs.map(d => publicListing(d, req.user?.id)));
+    }
 
     const docs = await Listing.find(where)
       .sort(sortMap[sort] || sortMap.new)
@@ -878,6 +920,100 @@ app.delete('/api/admin/listings/:id', authRequired, async (req, res) => {
       }
     }
     await doc.deleteOne();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------------------------------------------------------------------------
+// Admin: user management (list, promote/demote, block, delete)
+// Super admin (email matches SUPER_ADMIN_EMAIL) can override any other admin.
+// ---------------------------------------------------------------------------
+app.get('/api/admin/users', authRequired, async (req, res) => {
+  try {
+    const uid = authUserId(req);
+    if (!uid || !(await userIsAdmin(uid))) return res.status(403).json({ error: 'admin only' });
+    const users = await User.find({}).sort({ createdAt: -1 }).lean();
+    res.json({ users: users.map(u => ({
+      id: u._id.toString(),
+      email: u.email,
+      name: u.name || '',
+      phone: u.phone || '',
+      avatar: u.avatar || '',
+      provider: u.provider || 'local',
+      isAdmin: !!u.isAdmin,
+      isSuperAdmin: !!(u.email && u.email.toLowerCase() === SUPER_ADMIN_EMAIL),
+      isBlocked: !!u.isBlocked,
+      lastLoginAt: u.lastLoginAt,
+      createdAt: u.createdAt,
+    })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function requireSuperAdmin(req, res) {
+  const uid = authUserId(req);
+  if (!uid) { res.status(401).json({ error: 'unauthenticated' }); return null; }
+  const me = await User.findById(uid).lean();
+  if (!me || (me.email || '').toLowerCase() !== SUPER_ADMIN_EMAIL) {
+    res.status(403).json({ error: 'super admin only' });
+    return null;
+  }
+  return me;
+}
+
+app.post('/api/admin/users/:id/promote', authRequired, async (req, res) => {
+  try {
+    const me = await requireSuperAdmin(req, res); if (!me) return;
+    const u = await User.findById(req.params.id);
+    if (!u) return res.status(404).json({ error: 'not found' });
+    u.isAdmin = true; await u.save();
+    res.json({ ok: true, user: publicUser(u) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/users/:id/demote', authRequired, async (req, res) => {
+  try {
+    const me = await requireSuperAdmin(req, res); if (!me) return;
+    const u = await User.findById(req.params.id);
+    if (!u) return res.status(404).json({ error: 'not found' });
+    if ((u.email || '').toLowerCase() === SUPER_ADMIN_EMAIL) {
+      return res.status(400).json({ error: 'cannot demote super admin' });
+    }
+    u.isAdmin = false; await u.save();
+    res.json({ ok: true, user: publicUser(u) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/users/:id/block', authRequired, async (req, res) => {
+  try {
+    const me = await requireSuperAdmin(req, res); if (!me) return;
+    const u = await User.findById(req.params.id);
+    if (!u) return res.status(404).json({ error: 'not found' });
+    if ((u.email || '').toLowerCase() === SUPER_ADMIN_EMAIL) {
+      return res.status(400).json({ error: 'cannot block super admin' });
+    }
+    u.isBlocked = !!req.body?.blocked;
+    await u.save();
+    res.json({ ok: true, user: publicUser(u) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/admin/users/:id', authRequired, async (req, res) => {
+  try {
+    const me = await requireSuperAdmin(req, res); if (!me) return;
+    const u = await User.findById(req.params.id);
+    if (!u) return res.status(404).json({ error: 'not found' });
+    if ((u.email || '').toLowerCase() === SUPER_ADMIN_EMAIL) {
+      return res.status(400).json({ error: 'cannot delete super admin' });
+    }
+    const id = u._id;
+    await Promise.all([
+      Listing.deleteMany({ ownerId: id }),
+      SavedSearch.deleteMany({ userId: id }),
+      PushSubscription.deleteMany({ userId: id }),
+      Notification.deleteMany({ userId: id }),
+      Message.deleteMany({ $or: [{ fromId: id }, { toId: id }] }),
+      User.deleteOne({ _id: id }),
+    ]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

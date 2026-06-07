@@ -1,32 +1,53 @@
-// Walls service worker — push + minimal cache + install support
-self.addEventListener('install', e => self.skipWaiting());
-self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
-self.addEventListener('fetch', () => {});
+/* Walls Service Worker
+ * Minimal SW for PWA installability + Web Push.
+ * NOTE: We intentionally do NOT register a 'fetch' handler.
+ * Chrome logs "Fetch event handler is recognized as no-op" when a SW
+ * registers a fetch listener that doesn't actually intercept anything.
+ * Omitting the listener removes that warning and lets the browser
+ * use its normal network path with zero overhead.
+ */
 
-self.addEventListener('push', event => {
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
+/* Web Push: OS-level notifications */
+self.addEventListener('push', (event) => {
   let data = {};
-  try { data = event.data ? event.data.json() : {}; } catch (_) {
-    try { data = { title: 'Walls', body: event.data && event.data.text() }; } catch (__) {}
-  }
+  try { data = event.data ? event.data.json() : {}; } catch (_) { data = { title: 'Walls', body: event.data ? event.data.text() : '' }; }
   const title = data.title || 'Walls';
-  const opts = {
+  const options = {
     body: data.body || '',
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
-    data: data.data || { url: '/' },
-    tag: data.tag || 'walls-notif',
-    renotify: true
+    icon: data.icon || './icon192.png',
+    badge: data.badge || './icon192.png',
+    data: data.data || { url: data.url || '/' },
+    tag: data.tag || undefined,
+    renotify: !!data.renotify,
   };
-  event.waitUntil(self.registration.showNotification(title, opts));
+  event.waitUntil(self.registration.showNotification(title, options));
 });
 
-self.addEventListener('notificationclick', event => {
+self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || '/';
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-      for (const c of list) { if (c.url.includes(url) && 'focus' in c) return c.focus(); }
-      if (self.clients.openWindow) return self.clients.openWindow(url);
-    })
-  );
+  const target = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of all) {
+      try {
+        const url = new URL(client.url);
+        if (url.origin === self.location.origin) {
+          await client.focus();
+          if ('navigate' in client) { try { await client.navigate(target); } catch (_) {} }
+          return;
+        }
+      } catch (_) {}
+    }
+    if (self.clients.openWindow) await self.clients.openWindow(target);
+  })());
 });
+
+/* No 'fetch' handler on purpose. */

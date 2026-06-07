@@ -826,20 +826,10 @@ window.WW_APP = {
       /* Disclaimer removed app-wide */
       .footer-disclaimer { display: none !important; }
 
-      /* Bottom nav stays fixed and on top while scrolling */
-      .bottom-nav, #bottomNav {
-        position: fixed !important;
-        left: 0 !important;
-        right: 0 !important;
-        bottom: 0 !important;
-        z-index: 9000 !important;
-        background: #fff !important;
-        border-top: 1px solid rgba(0,0,0,0.08);
-        box-shadow: 0 -2px 10px rgba(0,0,0,0.06);
-        padding-bottom: env(safe-area-inset-bottom, 0);
-      }
-      /* Ensure content isn't hidden behind the fixed bottom-nav */
-      body { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0)) !important; }
+      /* Bottom nav: positioning, sizing, icons and text are controlled
+         entirely by styles.css (the original design). We intentionally
+         do NOT override .bottom-nav here — overriding it shifted the bar
+         off-screen and hid icons on some viewports. */
 
       @media (max-width: 768px) {
         html, body { overscroll-behavior: none !important; }
@@ -886,14 +876,7 @@ window.WW_APP = {
         }
         .header-icon-btn i { font-size: 14px !important; }
 
-        /* Compact bottom-nav on mobile */
-        .bottom-nav .bottom-nav-tab,
-        .bottom-nav .bottom-nav-search {
-          padding: 4px 2px !important;
-          font-size: 10.5px !important;
-        }
-        .bottom-nav .bottom-nav-tab i,
-        .bottom-nav .bottom-nav-search i { font-size: 16px !important; }
+        /* Bottom-nav sizing on mobile is owned by styles.css — do not override here. */
       }
       @media (min-width: 769px) {
         .horizontal-listings-grid .listing-card { width:240px !important; flex: 0 0 240px !important; }

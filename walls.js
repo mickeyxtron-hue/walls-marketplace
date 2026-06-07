@@ -7791,32 +7791,32 @@ HOW TO USE THE APP:
   // ---- Theme picker ----
   themes: {
     beige: {
-      '--primary': '#C8B897', '--primary-dark': '#A89B7A',
-      '--primary-soft': 'rgba(200,184,151,0.16)',
+      '--primary': '#E1306C', '--primary-dark': '#C13584',
+      '--primary-soft': 'rgba(225,48,108,0.16)',
       '--bg': '#FAF8F3', '--surface': '#FFFFFF', '--surface-2': '#F4F1EA',
       '--card': '#FFFFFF', '--text': '#1F1B16', '--text-muted': '#6E6658',
       '--border-color': '#E8E2D5',
-      '--nav-bg': '#FFFFFF', '--nav-active-bg': '#C8B897', '--nav-active-fg': '#1F1B16',
+      '--nav-bg': '#FFFFFF', '--nav-active-bg': '#E1306C', '--nav-active-fg': '#FFFFFF',
       '--nav-inactive-fg': '#6E6658'
     },
     navy: {
-      '--primary': '#C8A84E', '--primary-dark': '#B58E30',
-      '--primary-soft': 'rgba(200,168,78,0.16)',
+      '--primary': '#E1306C', '--primary-dark': '#C13584',
+      '--primary-soft': 'rgba(225,48,108,0.16)',
       '--bg': '#0B1220', '--surface': '#121C2E', '--surface-2': '#1A2438',
       '--card': '#152033', '--text': '#F1F4FA', '--text-muted': '#9AA6BD',
       '--border-color': 'rgba(255,255,255,0.08)',
-      '--brand': '#C8A84E',
-      '--nav-bg': '#152033', '--nav-active-bg': '#C8A84E', '--nav-active-fg': '#0B1220',
+      '--brand': '#E1306C',
+      '--nav-bg': '#152033', '--nav-active-bg': '#E1306C', '--nav-active-fg': '#FFFFFF',
       '--nav-inactive-fg': '#9AA6BD'
     },
     copper: {
-      '--primary': '#B87333', '--primary-dark': '#8a5524',
-      '--primary-soft': 'rgba(184,115,51,0.16)',
+      '--primary': '#E1306C', '--primary-dark': '#C13584',
+      '--primary-soft': 'rgba(225,48,108,0.16)',
       '--bg': '#171311', '--surface': '#211B17', '--surface-2': '#2A221C',
       '--card': '#241D18', '--text': '#F3EBE2', '--text-muted': '#B8A99A',
       '--border-color': 'rgba(255,255,255,0.08)',
-      '--brand': '#B87333',
-      '--nav-bg': '#241D18', '--nav-active-bg': '#B87333', '--nav-active-fg': '#FFFFFF',
+      '--brand': '#E1306C',
+      '--nav-bg': '#241D18', '--nav-active-bg': '#E1306C', '--nav-active-fg': '#FFFFFF',
       '--nav-inactive-fg': '#B8A99A'
     },
     instagram: {
@@ -7866,7 +7866,7 @@ HOW TO USE THE APP:
           { k:'beige',     label:'Warm Beige',                    swatches:['#C8B897','#A89B7A','#fafafa','#333333'] },
           { k:'navy',      label:'Deep Navy + Gold',              swatches:['#0F1A2A','#1A2A3A','#C8A84E','#F8F9FA'] },
           { k:'copper',    label:'Charcoal + Copper / Rose Gold', swatches:['#2B2B2B','#B87333','#D4A373','#FDFBF7'] },
-          { k:'instagram', label:'Instagram Dark',                swatches:['#000000','#1C1C1E','#E1306C','#F5F5F5'] }
+          { k:'instagram', label:'Dark Red',                      swatches:['#000000','#1C1C1E','#E1306C','#F5F5F5'] }
         ].map(t => `
 
           <button data-t="${t.k}" style="display:flex;align-items:center;gap:14px;width:100%;padding:12px;margin-bottom:10px;border:2px solid ${cur===t.k?'var(--primary,#C8A84E)':'var(--border-color,#eee)'};border-radius:12px;background:var(--surface,#fff);color:var(--text,#222);cursor:pointer;text-align:left;">

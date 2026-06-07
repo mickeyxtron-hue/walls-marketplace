@@ -802,7 +802,7 @@ window.WW_APP = {
     const style = document.createElement('style');
     style.id = 'ww-listing-layout-styles';
     style.textContent = `
-      html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; }
+      html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior-x: none; overscroll-behavior-y: auto; }
       body { -webkit-text-size-adjust: 100%; }
       *, *::before, *::after { box-sizing: border-box; }
       img { max-width: 100%; }
@@ -826,15 +826,36 @@ window.WW_APP = {
       /* Disclaimer removed app-wide */
       .footer-disclaimer { display: none !important; }
 
-      /* Bottom nav: positioning, sizing, icons and text are controlled
-         entirely by styles.css (the original design). We intentionally
-         do NOT override .bottom-nav here — overriding it shifted the bar
-         off-screen and hid icons on some viewports. */
+      /* Bottom nav: keep base look from styles.css, but pin it to the
+         bottom of the viewport and make sure it never gets pushed off
+         the left edge or clipped on narrow screens. */
+      .bottom-nav {
+        position: fixed !important;
+        left: 50% !important;
+        right: auto !important;
+        bottom: 0 !important;
+        transform: translateX(-50%) !important;
+        width: min(96vw, 520px) !important;
+        max-width: 96vw !important;
+        margin: 0 auto !important;
+        box-sizing: border-box !important;
+        z-index: 9999 !important;
+      }
 
       @media (max-width: 768px) {
-        html, body { overscroll-behavior: none !important; }
+        html, body { overscroll-behavior-x: none !important; overscroll-behavior-y: auto !important; }
         body { overflow-x: hidden !important; }
         #appView, #landingView, #sellerView, #adminView, .app-container, .content-wrapper, .main-content { width:100%; max-width:100%; overflow-x:hidden; }
+        .bottom-nav {
+          width: 94vw !important;
+          max-width: 94vw !important;
+          left: 50% !important;
+          right: auto !important;
+          transform: translateX(-50%) !important;
+          padding-left: 4px !important;
+          padding-right: 4px !important;
+        }
+        .bottom-nav-tab, .bottom-nav-search { min-width: 0 !important; flex: 1 1 0 !important; }
         .category-section-horizontal { padding: 0 8px; margin-bottom: 18px; }
         .horizontal-listings-grid { gap:10px; }
         .horizontal-listings-grid .listing-card.mobile { width: calc((100vw - 28px) / 2) !important; flex: 0 0 calc((100vw - 28px) / 2) !important; }

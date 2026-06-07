@@ -802,7 +802,7 @@ window.WW_APP = {
     const style = document.createElement('style');
     style.id = 'ww-listing-layout-styles';
     style.textContent = `
-      html, body { max-width: 100%; overflow-x: hidden; }
+      html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; }
       body { -webkit-text-size-adjust: 100%; }
       *, *::before, *::after { box-sizing: border-box; }
       img { max-width: 100%; }
@@ -822,7 +822,27 @@ window.WW_APP = {
       .listing-card-title, .listing-posted, .listing-property-meta, .meta-item { min-width: 0; }
       .listing-image, .listing-image img { transform: translateZ(0); backface-visibility: hidden; }
       .listing-image img { display:block; }
+
+      /* Disclaimer removed app-wide */
+      .footer-disclaimer { display: none !important; }
+
+      /* Bottom nav stays fixed and on top while scrolling */
+      .bottom-nav, #bottomNav {
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        z-index: 9000 !important;
+        background: #fff !important;
+        border-top: 1px solid rgba(0,0,0,0.08);
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.06);
+        padding-bottom: env(safe-area-inset-bottom, 0);
+      }
+      /* Ensure content isn't hidden behind the fixed bottom-nav */
+      body { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0)) !important; }
+
       @media (max-width: 768px) {
+        html, body { overscroll-behavior: none !important; }
         body { overflow-x: hidden !important; }
         #appView, #landingView, #sellerView, #adminView, .app-container, .content-wrapper, .main-content { width:100%; max-width:100%; overflow-x:hidden; }
         .category-section-horizontal { padding: 0 8px; margin-bottom: 18px; }
@@ -831,10 +851,49 @@ window.WW_APP = {
         .category-selected-grid, .saved-listings-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin:10px 8px 18px; }
         .category-selected-grid .listing-card.mobile, .saved-listings-grid .listing-card.mobile { width:100% !important; }
         .listing-card.mobile { margin: 0 !important; }
-        .listing-card.mobile .listing-image { height: 124px !important; border-radius: 8px !important; }
-        .listing-card.mobile .listing-card-title { font-size: 13px !important; line-height: 1.25 !important; }
+        .listing-card.mobile .listing-image { height: 118px !important; border-radius: 8px !important; }
+        .listing-card.mobile .listing-card-title { font-size: 12.5px !important; line-height: 1.2 !important; }
         .listing-card.mobile .listing-posted { font-size: 10px !important; }
         .modal .modal-content { width:min(94vw, 460px) !important; max-height:88vh; overflow:auto; }
+
+        /* Compact header: keep brand + lang on left, but shrink everything
+           so Theme + Profile do not overlap or wrap on small screens.
+           Lang, Theme and Profile sit close together at the right edge. */
+        .main-nav .nav-container {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: space-between !important;
+          flex-wrap: nowrap !important;
+          gap: 4px !important;
+          padding: 6px 8px !important;
+        }
+        .header-left-group { display: flex !important; align-items: center !important; gap: 4px !important; flex: 0 1 auto !important; min-width: 0 !important; }
+        .header-actions { display: flex !important; align-items: center !important; gap: 4px !important; flex: 0 0 auto !important; }
+        /* Place language next to theme/profile on the right */
+        .lang-switcher-container { order: 5 !important; margin-left: auto !important; }
+        .header-left-group .lang-switcher-container { order: 5 !important; }
+        .brand-title { font-size: 14px !important; }
+        .app-logo { width: 26px !important; height: 26px !important; }
+        .filter-wrap .filter-icon-btn span,
+        .lang-btn span,
+        .theme-toggle-btn span,
+        .profile-button span,
+        .install-header-btn span { display: none !important; }
+        .header-icon-btn {
+          padding: 6px 8px !important;
+          font-size: 13px !important;
+          gap: 0 !important;
+        }
+        .header-icon-btn i { font-size: 14px !important; }
+
+        /* Compact bottom-nav on mobile */
+        .bottom-nav .bottom-nav-tab,
+        .bottom-nav .bottom-nav-search {
+          padding: 4px 2px !important;
+          font-size: 10.5px !important;
+        }
+        .bottom-nav .bottom-nav-tab i,
+        .bottom-nav .bottom-nav-search i { font-size: 16px !important; }
       }
       @media (min-width: 769px) {
         .horizontal-listings-grid .listing-card { width:240px !important; flex: 0 0 240px !important; }
@@ -860,17 +919,30 @@ window.WW_APP = {
       this.loadUsers();
       this.loadLikes();
       this.loadListingsFromStorage();
-      // Cross-device sync: refetch backend listings periodically and when tab regains focus.
+      // Cross-device sync: refetch backend listings on tab focus / visibility only.
+      // We intentionally REMOVED the 8s polling because re-rendering the grid
+      // while the user is scrolling resets the scroll position on mobile.
       const _self = this;
       try {
-        if (this._listingsPollTimer) clearInterval(this._listingsPollTimer);
-        this._listingsPollTimer = setInterval(function() {
-          try { _self.loadListingsFromStorage(); } catch (_) {}
-        }, 8000);
-        window.addEventListener('focus', function() { try { _self.loadListingsFromStorage(); } catch (_) {} });
+        if (this._listingsPollTimer) { clearInterval(this._listingsPollTimer); this._listingsPollTimer = null; }
+        const _safeRefresh = function() {
+          try {
+            // Skip while the user is mid-scroll to avoid jank.
+            if (_self._userIsScrolling) return;
+            _self.loadListingsFromStorage();
+          } catch (_) {}
+        };
+        window.addEventListener('focus', _safeRefresh);
         document.addEventListener('visibilitychange', function() {
-          if (!document.hidden) { try { _self.loadListingsFromStorage(); } catch (_) {} }
+          if (!document.hidden) _safeRefresh();
         });
+        // Track scrolling so background refreshes don't disturb the user.
+        let _scrollT = null;
+        window.addEventListener('scroll', function() {
+          _self._userIsScrolling = true;
+          if (_scrollT) clearTimeout(_scrollT);
+          _scrollT = setTimeout(function() { _self._userIsScrolling = false; }, 600);
+        }, { passive: true });
       } catch (_) {}
       this.loadSupportContacts();
       this.loadHelpCenterData();
@@ -1470,20 +1542,45 @@ window.WW_APP = {
           }
           return l;
         });
+        // Filter out anything the user just deleted locally so a slow backend
+        // ack cannot resurrect it.
+        if (self._deletedListingIds) {
+          const cutoff = Date.now() - 60000;
+          self.listings = self.listings.filter(function(l) {
+            const ts = self._deletedListingIds[l.id];
+            return !ts || ts < cutoff;
+          });
+        }
         self.sortListings();
         try { window._wwStorage.set('ww_listings_v2', JSON.stringify(self.listings)); } catch (_) {}
         try {
           const modalOpen = !!document.querySelector('.modal[aria-hidden="false"], .modal[style*="display: flex"]');
           const canRefreshBuyView = self.currentView === 'app' && self.currentMode === 'buy' && !self.currentCategory && !modalOpen;
           const canRefreshCategoryView = self.currentView === 'app' && self.currentMode === 'buy' && self.currentCategory && !modalOpen;
-          if (canRefreshCategoryView && typeof self.showFilteredListings === 'function') {
-            const key = self.currentCategory.key;
-            const filtered = self.listings.filter(function(listing) {
-              return listing.category === key || listing.categoryLabel === self.currentCategory.label;
-            });
-            self.showFilteredListings(filtered, self.currentCategory.label, true);
-          } else if (canRefreshBuyView && typeof self.showAllListings === 'function') {
-            self.showAllListings();
+          // Build a cheap signature so we don't rebuild the grid (and reset
+          // mobile scroll) when the backend returned identical data.
+          let _sig = '';
+          try {
+            _sig = (self.listings || []).map(function(l) {
+              return [l.id, l.updatedAt || l.createdAt || '', l.occupancyStatus || '', l.verificationStatus || '', (l.images && l.images.length) || 0].join('|');
+            }).join(';');
+          } catch (_) { _sig = String(Date.now()); }
+          const changed = _sig !== self._lastListingsSig;
+          // Never auto-rerender while the user is actively scrolling.
+          if (changed && !self._userIsScrolling) {
+            if (canRefreshCategoryView && typeof self.showFilteredListings === 'function') {
+              const key = self.currentCategory.key;
+              const filtered = self.listings.filter(function(listing) {
+                return listing.category === key || listing.categoryLabel === self.currentCategory.label;
+              });
+              self.showFilteredListings(filtered, self.currentCategory.label, true);
+              self._lastListingsSig = _sig;
+            } else if (canRefreshBuyView && typeof self.showAllListings === 'function') {
+              self.showAllListings();
+              self._lastListingsSig = _sig;
+            } else {
+              self._lastListingsSig = _sig;
+            }
           }
           if (typeof self.updateAdminStats === 'function') self.updateAdminStats();
         } catch (_) {}
@@ -7394,18 +7491,32 @@ HOW TO USE THE APP:
         </div>
       `;
       card.querySelector('[data-act="view"]').addEventListener('click', () => this.showListingDetails(listing));
-      card.querySelector('[data-act="edit"]').addEventListener('click', () => this.editMyListing(listing.id));
+      card.querySelector('[data-act="edit"]').addEventListener('click', () => {
+        this.editMyListing(listing.id);
+        // Invalidate render signature so the buy view rebuilds when revisited
+        this._lastListingsSig = '';
+      });
       card.querySelector('[data-act="del"]').addEventListener('click', () => {
         if (confirm('Delete this listing permanently?')) {
-          this.deleteListingOnBackend(listing.id);
+          // Optimistically remove locally first so the buy view reflects it
+          // even if the user navigates away before the backend ack returns.
           this.listings = this.listings.filter(l => l.id !== listing.id);
           this.saveListingsToStorage();
+          this._lastListingsSig = '';
+          // Track local deletions so a stale backend poll cannot resurrect them.
+          this._deletedListingIds = this._deletedListingIds || {};
+          this._deletedListingIds[listing.id] = Date.now();
+          this.deleteListingOnBackend(listing.id);
           this.showMyListingsHub();
           showToast('Listing deleted', 'info');
         }
       });
       const occBtn = card.querySelector('[data-act="occ"]');
-      if (occBtn) occBtn.addEventListener('click', () => { this.toggleOccupancy(listing.id); this.showMyListingsHub(); });
+      if (occBtn) occBtn.addEventListener('click', () => {
+        this.toggleOccupancy(listing.id);
+        this._lastListingsSig = '';
+        this.showMyListingsHub();
+      });
       host.appendChild(card);
     });
   },

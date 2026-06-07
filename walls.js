@@ -1357,6 +1357,7 @@ window.WW_APP = {
             password: 'admin123',
             phone: '+263771593139',
             isAdmin: true,
+            isSuperAdmin: true,
             isBlocked: false,
             priority: 0,
             createdAt: new Date().toISOString()
@@ -1368,8 +1369,48 @@ window.WW_APP = {
       console.warn('Error loading users:', e);
       this.allUsers = [];
     }
+    // If we are signed in as an admin, also pull the full cross-device user
+    // list from the backend so the admin panel sees users from all devices.
+    this.refreshUsersFromServer();
   },
-  
+
+  refreshUsersFromServer: function() {
+    var self = this;
+    if (!this.user || !this.user.isAdmin) return;
+    if (typeof window._wwApi !== 'function') return;
+    window._wwApi('/api/admin/users', { timeout: 20000 })
+      .then(function(resp) {
+        if (!resp || !Array.isArray(resp.users)) return;
+        var byEmail = {};
+        (self.allUsers || []).forEach(function(u) {
+          if (u && u.email) byEmail[String(u.email).toLowerCase()] = u;
+        });
+        resp.users.forEach(function(su) {
+          var key = String(su.email || '').toLowerCase();
+          var existing = byEmail[key] || {};
+          byEmail[key] = Object.assign({}, existing, {
+            id: su.id,
+            name: su.name || existing.name || '',
+            email: su.email,
+            phone: su.phone || existing.phone || '',
+            avatar: su.avatar || '',
+            isAdmin: !!su.isAdmin,
+            isSuperAdmin: !!su.isSuperAdmin,
+            isBlocked: !!su.isBlocked,
+            createdAt: su.createdAt || existing.createdAt || new Date().toISOString(),
+            lastLoginAt: su.lastLoginAt,
+          });
+        });
+        self.allUsers = Object.values(byEmail);
+        self.saveUsers();
+        if (self.currentView === 'admin' || (typeof self.renderUsers === 'function' && document.getElementById('adminUsersTable'))) {
+          try { self.renderUsers(); } catch (_) {}
+          try { self.updateAdminStats(); } catch (_) {}
+        }
+      })
+      .catch(function(e) { console.warn('admin user list fetch failed:', e && e.message); });
+  },
+
   saveUsers: function() {
     try {
       localStorage.setItem('ww_users', JSON.stringify(this.allUsers));
@@ -2992,59 +3033,73 @@ window.WW_APP = {
     });
   },
   
+  _isSuperAdmin: function() {
+    return !!(this.user && (this.user.isSuperAdmin ||
+      String(this.user.email || '').toLowerCase() === 'mickeyxtron@gmail.com'));
+  },
+
+  _isMongoUserId: function(id) {
+    return typeof id === 'string' && /^[a-f0-9]{24}$/i.test(id);
+  },
+
   toggleUserBlock: function(userId) {
+    const self = this;
     const user = this.allUsers.find(u => u.id === userId);
-    if (!user) {
-      showToast('User not found', 'error');
-      return;
-    }
-    
-    if (user.isAdmin) {
-      showToast('Cannot block administrators', 'error');
-      return;
-    }
-    
-    user.isBlocked = !user.isBlocked;
-    this.saveUsers();
-    
-    showToast(`User ${user.isBlocked ? 'blocked' : 'unblocked'}`, 'success');
-    this.renderAdminUsers($id('adminUsersSearch')?.value || '');
+    if (!user) { showToast('User not found', 'error'); return; }
+    if (user.isSuperAdmin) { showToast('Cannot block the main admin', 'error'); return; }
+    if (!this._isSuperAdmin()) { showToast('Only the main admin can block users', 'error'); return; }
+    const next = !user.isBlocked;
+    const apply = function() {
+      user.isBlocked = next;
+      self.saveUsers();
+      showToast('User ' + (next ? 'blocked' : 'unblocked'), 'success');
+      self.renderAdminUsers($id('adminUsersSearch')?.value || '');
+    };
+    if (this._isMongoUserId(userId) && window._wwGetToken && window._wwGetToken()) {
+      window._wwApi('/api/admin/users/' + encodeURIComponent(userId) + '/block', {
+        method: 'POST', body: { blocked: next }, timeout: 20000
+      }).then(apply).catch(function(e) { showToast('Block failed: ' + (e && e.message || 'error'), 'error'); });
+    } else { apply(); }
   },
-  
+
   makeAdmin: function(userId) {
+    const self = this;
     const user = this.allUsers.find(u => u.id === userId);
-    if (!user) {
-      showToast('User not found', 'error');
-      return;
-    }
-    
-    if (confirm(`Make ${user.name} an administrator?`)) {
-      user.isAdmin = true;
-      user.priority = 0;
-      this.saveUsers();
-      showToast(`${user.name} is now an administrator`, 'success');
-      this.renderAdminUsers($id('adminUsersSearch')?.value || '');
-    }
+    if (!user) { showToast('User not found', 'error'); return; }
+    if (!this._isSuperAdmin()) { showToast('Only the main admin can promote users', 'error'); return; }
+    if (!confirm('Make ' + user.name + ' an administrator?')) return;
+    const apply = function() {
+      user.isAdmin = true; user.priority = 0;
+      self.saveUsers();
+      showToast(user.name + ' is now an administrator', 'success');
+      self.renderAdminUsers($id('adminUsersSearch')?.value || '');
+    };
+    if (this._isMongoUserId(userId) && window._wwGetToken && window._wwGetToken()) {
+      window._wwApi('/api/admin/users/' + encodeURIComponent(userId) + '/promote', {
+        method: 'POST', timeout: 20000
+      }).then(apply).catch(function(e) { showToast('Promote failed: ' + (e && e.message || 'error'), 'error'); });
+    } else { apply(); }
   },
-  
+
   revokeAdmin: function(userId) {
+    const self = this;
     const user = this.allUsers.find(u => u.id === userId);
-    if (!user) {
-      showToast('User not found', 'error');
-      return;
-    }
-    
-    if (user.email === this.user.email) {
-      showToast('Cannot revoke your own admin privileges', 'error');
-      return;
-    }
-    
-    if (confirm(`Revoke admin privileges from ${user.name}?`)) {
+    if (!user) { showToast('User not found', 'error'); return; }
+    if (user.email === (this.user && this.user.email)) { showToast('Cannot revoke your own admin privileges', 'error'); return; }
+    if (user.isSuperAdmin) { showToast('Cannot demote the main admin', 'error'); return; }
+    if (!this._isSuperAdmin()) { showToast('Only the main admin can demote admins', 'error'); return; }
+    if (!confirm('Revoke admin privileges from ' + user.name + '?')) return;
+    const apply = function() {
       user.isAdmin = false;
-      this.saveUsers();
-      showToast(`Admin privileges revoked from ${user.name}`, 'success');
-      this.renderAdminUsers($id('adminUsersSearch')?.value || '');
-    }
+      self.saveUsers();
+      showToast('Admin privileges revoked from ' + user.name, 'success');
+      self.renderAdminUsers($id('adminUsersSearch')?.value || '');
+    };
+    if (this._isMongoUserId(userId) && window._wwGetToken && window._wwGetToken()) {
+      window._wwApi('/api/admin/users/' + encodeURIComponent(userId) + '/demote', {
+        method: 'POST', timeout: 20000
+      }).then(apply).catch(function(e) { showToast('Demote failed: ' + (e && e.message || 'error'), 'error'); });
+    } else { apply(); }
   },
   
   adminDeleteListing: function(listingId) {
@@ -3068,27 +3123,30 @@ window.WW_APP = {
   },
   
   adminDeleteUser: function(userId) {
+    const self = this;
     const user = this.allUsers.find(u => u.id === userId);
-    if (!user) {
-      showToast('User not found', 'error');
-      return;
+    if (!user) { showToast('User not found', 'error'); return; }
+    if (user.isSuperAdmin) { showToast('Cannot delete the main admin', 'error'); return; }
+    if (user.isAdmin && !this._isSuperAdmin()) {
+      showToast('Only the main admin can delete other admins', 'error'); return;
     }
-    
-    if (user.isAdmin) {
-      showToast('Cannot delete administrators', 'error');
-      return;
-    }
-    
-    if (confirm(`Delete user ${user.name}? All their listings will also be deleted.`)) {
-      const _gone = this.listings.filter(l => l.createdBy === user.email).map(l => l.id);
-      _gone.forEach(id => this.deleteListingOnBackend(id));
-      this.listings = this.listings.filter(listing => listing.createdBy !== user.email);
-      this.allUsers = this.allUsers.filter(u => u.id !== userId);
-      this.saveUsers();
-      this.saveListingsToStorage();
-      
+    if (!confirm('Delete user ' + user.name + '? All their listings will also be deleted.')) return;
+    const apply = function() {
+      self.listings = self.listings.filter(listing => listing.createdBy !== user.email);
+      self.allUsers = self.allUsers.filter(u => u.id !== userId);
+      self.saveUsers();
+      self.saveListingsToStorage();
       showToast('User and their listings deleted', 'success');
-      this.renderAdminUsers($id('adminUsersSearch')?.value || '');
+      self.renderAdminUsers($id('adminUsersSearch')?.value || '');
+    };
+    if (this._isMongoUserId(userId) && window._wwGetToken && window._wwGetToken()) {
+      window._wwApi('/api/admin/users/' + encodeURIComponent(userId), {
+        method: 'DELETE', timeout: 30000
+      }).then(apply).catch(function(e) { showToast('Delete failed: ' + (e && e.message || 'error'), 'error'); });
+    } else {
+      const _gone = this.listings.filter(l => l.createdBy === user.email).map(l => l.id);
+      _gone.forEach(id => self.deleteListingOnBackend(id));
+      apply();
     }
   },
   
@@ -3623,25 +3681,41 @@ HOW TO USE THE APP:
               ` : ''}
               
               <div style="background: #f8f9fa; padding: 24px; border-radius: 12px;">
-                <h3 style="margin-top: 0;"><i class="fas fa-question" style="color:#2E7D32;"></i> Ask a Question</h3>
-                <p style="color: #666; margin-bottom: 16px;">Can't find what you're looking for? Ask us directly!</p>
-                
+                <h3 style="margin-top: 0;"><i class="fas fa-question" style="color:#2E7D32;"></i> Ask a Question / Make a Request</h3>
+                <p style="color: #666; margin-bottom: 16px;">Report an issue, give feedback, or request that one of your listings be made a <b>priority</b>, an <b>ad</b>, or opened for <b>bidding</b>. Your message goes straight to the main admin on WhatsApp.</p>
+
                 <div style="margin-bottom: 16px;">
                   <label style="display: block; margin-bottom: 8px; font-weight: 500;">Your Name</label>
                   <input type="text" id="questionName" placeholder="Enter your name" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
                 </div>
-                
+
+                <div style="margin-bottom: 16px;">
+                  <label style="display: block; margin-bottom: 8px; font-weight: 500;">Request type</label>
+                  <select id="questionType" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; background:#fff;">
+                    <option value="Question">General question / report</option>
+                    <option value="Priority request">Request: make my listing a priority</option>
+                    <option value="Ad request">Request: make my listing an ad (Sponsored)</option>
+                    <option value="Bid request">Request: enable bidding on my listing</option>
+                    <option value="Bug report">Bug / issue report</option>
+                  </select>
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                  <label style="display: block; margin-bottom: 8px; font-weight: 500;">Listing title (if applicable)</label>
+                  <input type="text" id="questionListing" placeholder="e.g. 3 bedroom house, Avondale" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
+                </div>
+
                 <div style="margin-bottom: 16px;">
                   <label style="display: block; margin-bottom: 8px; font-weight: 500;">Email (Optional)</label>
                   <input type="email" id="questionEmail" placeholder="Enter your email" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
                 </div>
-                
+
                 <div style="margin-bottom: 24px;">
-                  <label style="display: block; margin-bottom: 8px; font-weight: 500;">Your Question</label>
-                  <textarea id="questionText" rows="4" placeholder="Type your question here..." style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; resize: vertical;"></textarea>
+                  <label style="display: block; margin-bottom: 8px; font-weight: 500;">Your message</label>
+                  <textarea id="questionText" rows="4" placeholder="Type your message here..." style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; resize: vertical;"></textarea>
                 </div>
-                
-                <button class="btn btn-primary" id="submitQuestionBtn" style="width: 100%; padding: 14px;"><i class="fas fa-paper-plane"></i> Submit Question</button>
+
+                <button class="btn btn-primary" id="submitQuestionBtn" style="width: 100%; padding: 14px; background:#25D366; border:none;"><i class="fab fa-whatsapp"></i> Send to admin on WhatsApp</button>
               </div>
             </div>
           </div>
@@ -3655,33 +3729,50 @@ HOW TO USE THE APP:
     modal.querySelector('#submitQuestionBtn').addEventListener('click', () => {
       const name = modal.querySelector('#questionName').value.trim();
       const email = modal.querySelector('#questionEmail').value.trim();
+      const type = (modal.querySelector('#questionType') || {}).value || 'Question';
+      const listingTitle = (modal.querySelector('#questionListing') || {}).value || '';
       const question = modal.querySelector('#questionText').value.trim();
-      
+
       if (!name || !question) {
-        showToast('Please enter your name and question', 'error');
+        showToast('Please enter your name and message', 'error');
         return;
       }
-      
+
       const newQuestion = {
         id: 'question_' + Date.now(),
         userName: name,
         email: email,
+        type: type,
+        listingTitle: listingTitle,
         question: question,
         date: new Date().toISOString(),
         answer: null,
         answeredBy: null,
         answeredAt: null
       };
-      
+
       this.userQuestions.unshift(newQuestion);
       this.saveHelpCenterData();
-      
+
+      // Compose WhatsApp message and open chat with main admin.
+      const ADMIN_WA = '263771593139'; // 0771593139 in international format
+      const parts = [
+        '*Walls Help Center request*',
+        'Type: ' + type,
+        'From: ' + name + (email ? ' (' + email + ')' : ''),
+      ];
+      if (listingTitle) parts.push('Listing: ' + listingTitle);
+      parts.push('', question);
+      const waUrl = 'https://wa.me/' + ADMIN_WA + '?text=' + encodeURIComponent(parts.join('\n'));
+      window.open(waUrl, '_blank', 'noopener');
+
       modal.querySelector('#questionName').value = '';
       modal.querySelector('#questionEmail').value = '';
       modal.querySelector('#questionText').value = '';
-      
-      showToast('Question submitted successfully! Admin will respond soon.', 'success');
-      
+      if (modal.querySelector('#questionListing')) modal.querySelector('#questionListing').value = '';
+
+      showToast('Opening WhatsApp — tap Send to deliver your request.', 'success');
+
       if (this.user && this.user.isAdmin) {
         this.renderAdminHelp();
       }
@@ -4394,8 +4485,8 @@ HOW TO USE THE APP:
     
     if (listing.isAd) {
       const adBadge = document.createElement('div');
-      adBadge.innerHTML = '<i class="fas fa-ad"></i> AD';
-      adBadge.style.cssText = 'position: absolute; top: 8px; right: 8px; background: rgba(255,152,0,0.95); color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; z-index: 2; display: flex; align-items: center; gap: 4px; backdrop-filter: blur(4px);';
+      adBadge.innerHTML = '<i class="fas fa-bullhorn"></i> Sponsored';
+      adBadge.style.cssText = 'position: absolute; top: 8px; right: 8px; background: linear-gradient(135deg,#ff9800,#ff6f00); color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; z-index: 2; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(255,111,0,0.4);';
       imgContainer.appendChild(adBadge);
     }
     
@@ -4520,8 +4611,8 @@ HOW TO USE THE APP:
     
     if (listing.isAd) {
       const adBadge = document.createElement('div');
-      adBadge.innerHTML = '<i class="fas fa-ad"></i>';
-      adBadge.style.cssText = 'position: absolute; top: 6px; right: 6px; background: rgba(255,152,0,0.95); color: white; padding: 3px 6px; border-radius: 4px; font-size: 9px; z-index: 2;';
+      adBadge.innerHTML = '<i class="fas fa-bullhorn"></i> Sponsored';
+      adBadge.style.cssText = 'position: absolute; top: 6px; right: 6px; background: linear-gradient(135deg,#ff9800,#ff6f00); color: white; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; z-index: 2; display: flex; align-items: center; gap: 3px; box-shadow: 0 1px 4px rgba(255,111,0,0.4);';
       imgContainer.appendChild(adBadge);
     }
     if (listing.bidEnabled) {

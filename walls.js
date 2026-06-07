@@ -384,6 +384,11 @@ window.WW_APP = {
   
   // Saved searches (new)
   savedSearches: [],
+
+  // Admin / help-center state defaults (prevent undefined.length crashes)
+  supportContacts: [],
+  userQuestions: [],
+  helpCenterVideo: null,
   
   // Helper to get default walls categories (NO SCHOOLS, includes services, new categories)
   _removedCategoryKeys: ['sellingHouses', 'sellingFlats', 'cottagesToSale', 'residentialStands'],
@@ -2654,6 +2659,7 @@ window.WW_APP = {
     const supportBody = $id('adminSupportBody');
     if (!supportBody) return;
     
+    if (!Array.isArray(this.supportContacts)) this.supportContacts = [];
     if (this.supportContacts.length === 0) {
       supportBody.innerHTML = `
         <tr>
@@ -2666,7 +2672,7 @@ window.WW_APP = {
       return;
     }
     
-    supportBody.innerHTML = this.supportContacts.map(contact => `
+    supportBody.innerHTML = (this.supportContacts || []).map(contact => `
       <tr>
         <td><strong>${contact.type}</strong></td>
         <td>${contact.name}</td>
@@ -2690,6 +2696,7 @@ window.WW_APP = {
     const questionsList = $id('userQuestionsList');
     if (!questionsList) return;
     
+    if (!Array.isArray(this.userQuestions)) this.userQuestions = [];
     if (this.userQuestions.length === 0) {
       questionsList.innerHTML = `
         <div style="text-align: center; padding: 20px; color: #666;">
@@ -2700,7 +2707,7 @@ window.WW_APP = {
       return;
     }
     
-    questionsList.innerHTML = this.userQuestions.map((q, index) => `
+    questionsList.innerHTML = (this.userQuestions || []).map((q, index) => `
       <div class="question-item" style="padding: 16px; background: white; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e0e0e0;">
         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
           <div>

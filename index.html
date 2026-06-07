@@ -88,6 +88,54 @@
         justify-content: flex-start;
       }
     }
+
+    /* ===== Stagnant, slimmer bottom nav (mobile fixes) ===== */
+    .bottom-nav {
+      position: fixed !important;
+      left: 50% !important;
+      bottom: 0 !important;
+      transform: translateX(-50%) !important;
+      width: min(96vw, 520px) !important;
+      max-width: 96vw !important;
+      z-index: 2147483000 !important;
+      padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)) !important;
+      min-height: 48px !important;
+      background: var(--card, #fff) !important;
+      border-top: 1px solid var(--border-color, #e8e3d7) !important;
+      box-shadow: 0 -4px 14px rgba(0,0,0,.08) !important;
+      border-radius: 14px 14px 0 0 !important;
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+      transition: none !important;
+    }
+    .bottom-nav.hidden, .bottom-nav[hidden] { display: flex !important; }
+    .bottom-nav-tab, .bottom-nav-search {
+      padding: 4px 2px !important;
+      font-size: 10.5px !important;
+      gap: 2px !important;
+      color: var(--text, #333) !important;
+    }
+    .bottom-nav-tab i, .bottom-nav-search i {
+      width: 18px; height: 18px; font-size: 16px !important;
+      color: var(--text, #333) !important;
+    }
+    .bottom-nav-tab.active, .bottom-nav-tab.active i {
+      color: var(--primary-dark, #A89B7A) !important;
+    }
+    .bottom-nav-search {
+      background: var(--primary, #C8B897) !important;
+      color: #fff !important; border-radius: 10px !important;
+    }
+    .bottom-nav-search i { color: #fff !important; }
+    /* Reserve room so content never hides under the fixed bar */
+    body { padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px)) !important; }
+    @media (max-width: 768px) {
+      .bottom-nav { min-height: 46px !important; }
+      .bottom-nav-tab span, .bottom-nav-search span { font-size: 10px !important; }
+      body { padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important; }
+    }
   </style>
 </head>
 <body>

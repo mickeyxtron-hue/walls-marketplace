@@ -575,8 +575,22 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   .brand-title { font-size: 1rem; }
   .header-icon-btn span { display: inline-block; font-size: 0.5rem; }
   .theme-toggle-btn span { display: inline-block; }
-  .header-icon-btn { padding: 3px 4px; min-width: 36px; min-height: 38px; }
+  .header-icon-btn { padding: 3px 4px; min-width: 32px; min-height: 36px; }
   .header-icon-btn i { font-size: 0.9rem; }
+
+  /* Move theme + profile/login icons to the left on mobile browsers */
+  .nav-container { justify-content: flex-start; gap: 2px; }
+  .header-left-group { flex: 0 0 auto; gap: 2px; }
+  .header-actions { gap: 1px; margin-left: 2px; margin-right: auto; }
+
+  /* Tighten bottom-nav spacing further on mobile */
+  .bottom-nav { gap: 0; padding: 4px 4px; width: calc(100% - 16px); }
+  .bottom-nav-tab,
+  .bottom-nav-search { padding: 5px 2px; gap: 0; min-height: 40px; }
+  .bottom-nav-tab span,
+  .bottom-nav-search span { font-size: 9px; max-width: 3.6rem; }
+  .bottom-nav-tab i,
+  .bottom-nav-search i { font-size: 15px; }
 }
 
 @media (min-width: 769px) {
@@ -1258,168 +1272,4 @@ input, select, textarea {
   .ww-lightbox .ww-lb-prev,
   .ww-lightbox .ww-lb-next { display: none; }
   .ww-lightbox .ww-lb-img { max-height: 88vh; }
-}
-
-/* ============================================================
- * Footer adjustments — moved from index.html inline <style>
- * ============================================================ */
-.main-footer {
-  background: var(--card);
-  border-top: 1px solid var(--border-color);
-  padding: 12px 16px 24px;
-  font-size: 13px;
-  color: var(--text);
-  margin-top: auto;
-}
-.footer-inner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-.footer-legal {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.footer-disclaimer {
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--text-muted);
-}
-.copyright {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.footer-connect {
-  text-align: right;
-}
-.footer-connect h4 {
-  margin: 0 0 6px 0;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-}
-.footer-connect .social-links {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-}
-.footer-connect .social-links a {
-  color: var(--text);
-  font-size: 18px;
-  transition: color 0.2s;
-  width: auto;
-  height: auto;
-  border: none;
-  border-radius: 0;
-  display: inline-flex;
-}
-.footer-connect .social-links a:hover {
-  color: var(--primary);
-  background: transparent;
-}
-@media (max-width: 640px) {
-  .footer-inner {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .footer-connect {
-    text-align: left;
-    width: 100%;
-  }
-  .footer-connect .social-links {
-    justify-content: flex-start;
-  }
-}
-
-/* ============================================================
- * Floating pill bottom nav — moved from index.html inline <style>
- * ============================================================ */
-html, body {
-  overflow-x: hidden !important;
-  max-width: 100vw !important;
-  width: 100% !important;
-  overscroll-behavior-x: none !important;
-  touch-action: pan-y !important;
-}
-* { max-width: 100%; box-sizing: border-box; }
-img, video, iframe, canvas, svg { max-width: 100% !important; height: auto; }
-
-.bottom-nav {
-  position: fixed !important;
-  left: 50% !important;
-  right: auto !important;
-  top: auto !important;
-  bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
-  transform: translateX(-50%) !important;
-  width: min(94vw, 440px) !important;
-  max-width: 94vw !important;
-  z-index: 2147483000 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-around !important;
-  gap: 2px !important;
-  padding: 5px 8px !important;
-  border-radius: 999px !important;
-  background: var(--nav-bg, rgba(28,28,30,0.92)) !important;
-  backdrop-filter: saturate(180%) blur(18px) !important;
-  -webkit-backdrop-filter: saturate(180%) blur(18px) !important;
-  border: 1px solid var(--border-color, rgba(255,255,255,0.08)) !important;
-  box-shadow: 0 10px 32px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.18) !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  pointer-events: auto !important;
-  transition: none !important;
-  overflow: visible !important;
-}
-.bottom-nav.hidden, .bottom-nav[hidden] { display: flex !important; }
-
-.bottom-nav-tab, .bottom-nav-search {
-  background: transparent !important;
-  border: none !important;
-  padding: 5px 3px !important;
-  min-height: 42px !important;
-  flex: 1 1 0 !important;
-  min-width: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 1px !important;
-  color: var(--nav-inactive-fg, rgba(255,255,255,0.78)) !important;
-  border-radius: 14px !important;
-  cursor: pointer;
-}
-.bottom-nav-tab.active, .bottom-nav-search.active {
-  color: var(--nav-active-fg, #fff) !important;
-  background: var(--nav-active-bg, rgba(255,255,255,0.12)) !important;
-}
-.bottom-nav-tab i, .bottom-nav-search i,
-.bottom-nav-tab svg, .bottom-nav-search svg {
-  width: 18px !important; height: 18px !important; font-size: 16px !important;
-  stroke-width: 2 !important;
-}
-.bottom-nav-tab span, .bottom-nav-search span {
-  font-size: 9px !important;
-  line-height: 1.1 !important;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-  font-weight: 500;
-}
-
-/* Reserve room so content never hides under the floating bar */
-body { padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important; }
-
-@media (max-width: 480px) {
-  .bottom-nav { width: min(94vw, 400px) !important; padding: 4px 6px !important; }
-  .bottom-nav-tab span, .bottom-nav-search span { font-size: 8.5px !important; }
-  .bottom-nav-tab, .bottom-nav-search { min-height: 40px !important; }
-  .bottom-nav-tab i, .bottom-nav-search i,
-  .bottom-nav-tab svg, .bottom-nav-search svg { width: 17px !important; height: 17px !important; }
 }

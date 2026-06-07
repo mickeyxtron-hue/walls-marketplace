@@ -575,22 +575,8 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   .brand-title { font-size: 1rem; }
   .header-icon-btn span { display: inline-block; font-size: 0.5rem; }
   .theme-toggle-btn span { display: inline-block; }
-  .header-icon-btn { padding: 3px 4px; min-width: 32px; min-height: 36px; }
+  .header-icon-btn { padding: 3px 4px; min-width: 36px; min-height: 38px; }
   .header-icon-btn i { font-size: 0.9rem; }
-
-  /* Move theme + profile/login icons to the left on mobile browsers */
-  .nav-container { justify-content: flex-start; gap: 2px; }
-  .header-left-group { flex: 0 0 auto; gap: 2px; }
-  .header-actions { gap: 1px; margin-left: 2px; margin-right: auto; }
-
-  /* Tighten bottom-nav spacing further on mobile */
-  .bottom-nav { gap: 0; padding: 4px 4px; width: calc(100% - 16px); }
-  .bottom-nav-tab,
-  .bottom-nav-search { padding: 5px 2px; gap: 0; min-height: 40px; }
-  .bottom-nav-tab span,
-  .bottom-nav-search span { font-size: 9px; max-width: 3.6rem; }
-  .bottom-nav-tab i,
-  .bottom-nav-search i { font-size: 15px; }
 }
 
 @media (min-width: 769px) {
@@ -1272,4 +1258,37 @@ input, select, textarea {
   .ww-lightbox .ww-lb-prev,
   .ww-lightbox .ww-lb-next { display: none; }
   .ww-lightbox .ww-lb-img { max-height: 88vh; }
+}
+
+/* ============================================================
+ * Mobile bottom-nav: pack icons tight, fit full width with margins
+ * ============================================================ */
+@media (max-width: 768px) {
+  .bottom-nav {
+    width: calc(100% - 12px) !important;
+    max-width: 100% !important;
+    gap: 0 !important;
+    padding: 3px 4px !important;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .bottom-nav-tab,
+  .bottom-nav-search {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    padding: 4px 0 !important;
+    gap: 1px !important;
+    min-height: 38px !important;
+  }
+  .bottom-nav-tab.active { flex: 1 1 0 !important; }
+  .bottom-nav-tab span,
+  .bottom-nav-search span {
+    font-size: 8.5px !important;
+    max-width: 100% !important;
+    letter-spacing: 0 !important;
+  }
+  .bottom-nav-tab i,
+  .bottom-nav-search i { font-size: 14px !important; }
+  .bottom-nav-tab svg,
+  .bottom-nav-search svg { width: 16px !important; height: 16px !important; }
 }

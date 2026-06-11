@@ -4126,9 +4126,11 @@ HOW TO USE THE APP:
         this.showSellerView();
         break;
       case 'recent':
+        document.querySelectorAll('.category-picker-modal, .ww-popup').forEach(function(p){ p.remove(); });
         this.showRecentEnquiries();
         break;
       case 'mylistings':
+        document.querySelectorAll('.category-picker-modal, .ww-popup').forEach(function(p){ p.remove(); });
         this.showMyListingsHub();
         break;
     }
@@ -4856,6 +4858,8 @@ HOW TO USE THE APP:
       detailRows.push(['Bedrooms', listing.bedrooms]);
     if (listing.bathrooms !== undefined && listing.bathrooms !== '' && listing.bathrooms !== null)
       detailRows.push(['Bathrooms', listing.bathrooms]);
+    if (listing.bedsPerRoom !== undefined && listing.bedsPerRoom !== '' && listing.bedsPerRoom !== null)
+      detailRows.push(['Beds per Room', listing.bedsPerRoom]);
     if (listing.areaSqm !== undefined && listing.areaSqm !== '' && listing.areaSqm !== null)
       detailRows.push(['Area', listing.areaSqm + ' m²']);
     if (listing.categoryLabel) detailRows.push(['Category', listing.categoryLabel]);
@@ -4959,7 +4963,7 @@ HOW TO USE THE APP:
         <div class="gps-location" style="margin-bottom:20px;padding:16px;background:#f0f8ff;border-radius:12px;border-left:4px solid #2196F3;">
           <h3 style="margin-bottom:12px;font-size:16px;color:#2196F3;display:flex;align-items:center;gap:8px;"><i class="fas fa-map-marker-alt"></i> GPS Location</h3>
           <code style="background:#fff;padding:6px 12px;border-radius:6px;border:1px solid #2196F3;color:#2196F3;font-weight:bold;">${listing.gpsCoordinates}</code>
-          <div style="display:flex;gap:12px;margin-top:12px;"><a href="https://maps.google.com/?q=${encodeURIComponent(listing.gpsCoordinates)}" target="_blank" style="background:#2196F3;color:white;padding:10px 16px;border-radius:8px;text-decoration:none;">View on Google Maps</a><button onclick="window.WW_APP.copyToClipboard('${listing.gpsCoordinates}')" style="background:#f0f0f0;border:1px solid #ddd;border-radius:8px;padding:10px 16px;cursor:pointer;">Copy Coordinates</button></div>
+          <div style="display:flex;gap:12px;margin-top:12px;flex-wrap:wrap;"><button onclick="window.WW_APP.copyToClipboard('${listing.gpsCoordinates}')" style="background:#f0f0f0;border:1px solid #ddd;border-radius:8px;padding:10px 16px;cursor:pointer;">Copy Coordinates</button><button onclick="window.WW_APP.openInMaps('${listing.gpsCoordinates}')" style="background:#4285F4;color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:8px;"><i class="fas fa-map-marked-alt"></i> View on Google Maps</button></div>
         </div>`;
     }
     
@@ -5090,6 +5094,30 @@ HOW TO USE THE APP:
       document.body.removeChild(ta);
       showToast('Copied!', 'success');
     });
+  },
+  openInMaps: function(coords) {
+    if (!coords) { showToast('No coordinates available', 'error'); return; }
+    var parts = String(coords).split(',').map(function(s){ return s.trim(); });
+    if (parts.length < 2 || isNaN(parseFloat(parts[0])) || isNaN(parseFloat(parts[1]))) {
+      showToast('Invalid coordinates', 'error');
+      return;
+    }
+    var lat = parseFloat(parts[0]);
+    var lng = parseFloat(parts[1]);
+    var ua = (navigator.userAgent || '');
+    var isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var gmapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
+    if (isIOS) {
+      var choice = window.confirm('Open in Apple Maps?\n\nOK = Apple Maps\nCancel = Google Maps');
+      if (choice) {
+        window.location.href = 'maps://?q=' + lat + ',' + lng + '&ll=' + lat + ',' + lng;
+        setTimeout(function(){ window.open(gmapsUrl, '_blank'); }, 600);
+      } else {
+        window.open(gmapsUrl, '_blank');
+      }
+    } else {
+      window.open(gmapsUrl, '_blank');
+    }
   },
   
   showImage: function(index) {
@@ -5372,7 +5400,7 @@ HOW TO USE THE APP:
           </div>
         </div>
         
-        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
           <div class="form-group">
             <label for="bedrooms">Bedrooms</label>
             <input type="number" id="bedrooms" name="bedrooms" min="0" placeholder="e.g., 3" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
@@ -5380,6 +5408,10 @@ HOW TO USE THE APP:
           <div class="form-group">
             <label for="bathrooms">Bathrooms</label>
             <input type="number" id="bathrooms" name="bathrooms" min="0" placeholder="e.g., 2" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
+          </div>
+          <div class="form-group">
+            <label for="bedsPerRoom">Beds per Room <span style="font-weight:400;color:#888;">(optional)</span></label>
+            <input type="number" id="bedsPerRoom" name="bedsPerRoom" min="0" placeholder="e.g., 2" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
           </div>
           <div class="form-group">
             <label for="areaSqm">Area (m²) <span style="font-weight:400;color:#888;">(optional)</span></label>
@@ -5627,7 +5659,7 @@ HOW TO USE THE APP:
         return `
       <div class="form-group">
         <label for="images">${_label}</label>
-        <input type="file" id="images" name="images" accept="image/*,.heic,.heif,.webp,.avif,.jfif,.bmp,.tif,.tiff,.svg" ${_multiple} ${_required} style="width:100%;padding:12px;border:2px dashed #e0e0e0;border-radius:8px;background:#f9f9f9;cursor:pointer;">
+        <input type="file" id="images" name="images" accept="image/*,.heic,.heif,.webp,.avif,.jfif,.bmp,.tif,.tiff,.svg" ${_multiple} ${_required} style="width:100%;padding:14px;border:2px dashed #C8B897;border-radius:8px;background:#FBF7EE;cursor:pointer;color:#7a6843;font-weight:700;font-size:15px;">
         <div id="imagePreview" class="image-preview" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(100px, 1fr));gap:12px;margin-top:16px;"></div>
       </div>`;
       })()}
@@ -5799,6 +5831,7 @@ HOW TO USE THE APP:
         listing.features = formData.getAll('features[]');
         listing.bedrooms = formData.get('bedrooms') || '';
         listing.bathrooms = formData.get('bathrooms') || '';
+        listing.bedsPerRoom = formData.get('bedsPerRoom') || '';
         listing.areaSqm = formData.get('areaSqm') || '';
       }
       

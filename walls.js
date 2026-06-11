@@ -1,16 +1,5 @@
-// ===== walls.js - FULL WALLS + BIDDING + SAVED SEARCHES & NOTIFICATIONS =====
 window.WW_APP = window.WW_APP || {};
 
-// ============= OAUTH / AUTH BACKEND CONFIG =============
-// Google: only the CLIENT ID is used in browser (Google Identity Services).
-// NEVER put your Google client SECRET in this file — it would be public.
-// Email auth: set EMAIL_LOGIN_URL and EMAIL_REGISTER_URL to your backend endpoints.
-//   - POST EMAIL_LOGIN_URL    body { email, password } -> returns { user: {...} } on 200
-//   - POST EMAIL_REGISTER_URL body { name, email, phone, password } -> returns { user: {...} } on 200
-// Optionally set GOOGLE_VERIFY_URL to a backend that validates the Google id_token.
-// Auto-detect backend host. The custom domain currently serves the frontend,
-// while the working API lives on Render, so probe candidates and persist the
-// first healthy backend instead of assuming same-origin forever.
 (function(){
   var DEFAULT_LIVE_API = 'https://walls-marketplace.onrender.com';
   var initialBase = DEFAULT_LIVE_API;

@@ -4963,7 +4963,7 @@ HOW TO USE THE APP:
         <div class="gps-location" style="margin-bottom:20px;padding:16px;background:#f0f8ff;border-radius:12px;border-left:4px solid #2196F3;">
           <h3 style="margin-bottom:12px;font-size:16px;color:#2196F3;display:flex;align-items:center;gap:8px;"><i class="fas fa-map-marker-alt"></i> GPS Location</h3>
           <code style="background:#fff;padding:6px 12px;border-radius:6px;border:1px solid #2196F3;color:#2196F3;font-weight:bold;">${listing.gpsCoordinates}</code>
-          <div style="display:flex;gap:12px;margin-top:12px;flex-wrap:wrap;"><button onclick="window.WW_APP.copyToClipboard('${listing.gpsCoordinates}')" style="background:#f0f0f0;border:1px solid #ddd;border-radius:8px;padding:10px 16px;cursor:pointer;">Copy Coordinates</button><button onclick="window.WW_APP.openInMaps('${listing.gpsCoordinates}')" style="background:#4285F4;color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:8px;"><i class="fas fa-map-marked-alt"></i> View on Google Maps</button></div>
+          <div style="display:flex;gap:12px;margin-top:12px;flex-wrap:wrap;"><button onclick="window.WW_APP.openInMaps('${listing.gpsCoordinates}')" style="background:#2196F3;border:1px solid #2196F3;color:#fff;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px;"><i class="fas fa-map-marked-alt"></i> View on Google Maps</button><button onclick="window.WW_APP.copyToClipboard('${listing.gpsCoordinates}')" style="background:#f0f0f0;border:1px solid #ddd;border-radius:8px;padding:10px 16px;cursor:pointer;">Copy Coordinates</button></div>
         </div>`;
     }
     
@@ -5095,28 +5095,23 @@ HOW TO USE THE APP:
       showToast('Copied!', 'success');
     });
   },
+
   openInMaps: function(coords) {
     if (!coords) { showToast('No coordinates available', 'error'); return; }
-    var parts = String(coords).split(',').map(function(s){ return s.trim(); });
-    if (parts.length < 2 || isNaN(parseFloat(parts[0])) || isNaN(parseFloat(parts[1]))) {
-      showToast('Invalid coordinates', 'error');
-      return;
-    }
-    var lat = parseFloat(parts[0]);
-    var lng = parseFloat(parts[1]);
-    var ua = (navigator.userAgent || '');
-    var isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    var gmapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
+    var m = String(coords).match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+    if (!m) { showToast('Invalid coordinates', 'error'); return; }
+    var lat = m[1], lng = m[2];
+    var ua = navigator.userAgent || '';
+    var isIOS = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document);
+    var gmaps = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
     if (isIOS) {
-      var choice = window.confirm('Open in Apple Maps?\n\nOK = Apple Maps\nCancel = Google Maps');
-      if (choice) {
-        window.location.href = 'maps://?q=' + lat + ',' + lng + '&ll=' + lat + ',' + lng;
-        setTimeout(function(){ window.open(gmapsUrl, '_blank'); }, 600);
+      if (window.confirm('Open in Apple Maps? (Cancel = Google Maps)')) {
+        window.location.href = 'maps://?q=' + lat + ',' + lng;
       } else {
-        window.open(gmapsUrl, '_blank');
+        window.open(gmaps, '_blank');
       }
     } else {
-      window.open(gmapsUrl, '_blank');
+      window.open(gmaps, '_blank');
     }
   },
   

@@ -127,8 +127,8 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   padding: 0 8px;
   background: color-mix(in srgb, var(--card) 92%, transparent);
   border-bottom: 1px solid var(--border-color);
-  backdrop-filter: saturate(180%) blur(12px);
   -webkit-backdrop-filter: saturate(180%) blur(12px);
+  backdrop-filter: saturate(180%) blur(12px);
   box-shadow: var(--shadow-sm);
 }
 
@@ -719,8 +719,8 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   width: calc(100% - 24px);
   max-width: 460px;
   border: 1px solid var(--border-color);
-  backdrop-filter: saturate(180%) blur(10px);
   -webkit-backdrop-filter: saturate(180%) blur(10px);
+  backdrop-filter: saturate(180%) blur(10px);
 }
 
 .bottom-nav-tab,
@@ -821,6 +821,7 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   justify-content: center;
   z-index: 9999;
   padding: 16px;
+  -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
 }
 

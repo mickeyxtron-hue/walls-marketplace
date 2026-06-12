@@ -1,5 +1,16 @@
+// ===== walls.js - FULL WALLS + BIDDING + SAVED SEARCHES & NOTIFICATIONS =====
 window.WW_APP = window.WW_APP || {};
 
+// ============= OAUTH / AUTH BACKEND CONFIG =============
+// Google: only the CLIENT ID is used in browser (Google Identity Services).
+// NEVER put your Google client SECRET in this file — it would be public.
+// Email auth: set EMAIL_LOGIN_URL and EMAIL_REGISTER_URL to your backend endpoints.
+//   - POST EMAIL_LOGIN_URL    body { email, password } -> returns { user: {...} } on 200
+//   - POST EMAIL_REGISTER_URL body { name, email, phone, password } -> returns { user: {...} } on 200
+// Optionally set GOOGLE_VERIFY_URL to a backend that validates the Google id_token.
+// Auto-detect backend host. The custom domain currently serves the frontend,
+// while the working API lives on Render, so probe candidates and persist the
+// first healthy backend instead of assuming same-origin forever.
 (function(){
   var DEFAULT_LIVE_API = 'https://walls-marketplace.onrender.com';
   var initialBase = DEFAULT_LIVE_API;
@@ -783,11 +794,31 @@ window.WW_APP = {
       ownerId: uid,
       bedrooms: listing.bedrooms,
       bathrooms: listing.bathrooms,
+      bedsPerRoom: listing.bedsPerRoom,
       areaSqm: listing.areaSqm,
+      gpsCoordinates: listing.gpsCoordinates,
       contact: listing.contact,
       bidEnabled: listing.bidEnabled,
       createdAt: listing.createdAt
     };
+  },
+
+  _getListingBedsPerRoom: function(listing) {
+    if (!listing) return '';
+    const fields = listing.fields && typeof listing.fields === 'object' ? listing.fields : {};
+    return listing.bedsPerRoom ?? fields.bedsPerRoom ?? '';
+  },
+
+  _getListingGpsCoordinates: function(listing) {
+    if (!listing) return '';
+    const fields = listing.fields && typeof listing.fields === 'object' ? listing.fields : {};
+    const raw = listing.gpsCoordinates || fields.gpsCoordinates || ((listing.lat != null && listing.lng != null) ? (listing.lat + ', ' + listing.lng) : '');
+    const m = String(raw || '').match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+    if (!m) return '';
+    const lat = Number(m[1]);
+    const lng = Number(m[2]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return '';
+    return lat + ', ' + lng;
   },
 
 
@@ -1490,11 +1521,14 @@ window.WW_APP = {
       if (l.fields.createdBy) l.createdBy = l.fields.createdBy;
       if (l.fields.bedrooms != null && l.bedrooms == null) l.bedrooms = l.fields.bedrooms;
       if (l.fields.bathrooms != null && l.bathrooms == null) l.bathrooms = l.fields.bathrooms;
+      if (l.fields.bedsPerRoom != null && (l.bedsPerRoom === undefined || l.bedsPerRoom === null || l.bedsPerRoom === '')) l.bedsPerRoom = l.fields.bedsPerRoom;
       if (l.fields.areaSqm != null && l.areaSqm == null) l.areaSqm = l.fields.areaSqm;
+      if (l.fields.gpsCoordinates != null && !l.gpsCoordinates) l.gpsCoordinates = l.fields.gpsCoordinates;
       if (l.fields.categoryLabel && !l.categoryLabel) l.categoryLabel = l.fields.categoryLabel;
       if (l.fields.clientId && !l.clientId) l.clientId = l.fields.clientId;
       if (l.fields.contact && !l.contact) l.contact = l.fields.contact;
     }
+    if (!l.gpsCoordinates && l.lat != null && l.lng != null) l.gpsCoordinates = l.lat + ', ' + l.lng;
     if (!l.category && l.fields && l.fields.category) l.category = l.fields.category;
     l.categoryLabel = this._resolveCategoryLabel(l);
     if (!l.contact) l.contact = { name: '', email: '', phone: '' };
@@ -4827,6 +4861,8 @@ HOW TO USE THE APP:
     const isMobile = window.innerWidth <= 768;
     this.currentImageIndex = 0;
     this.currentListingImages = listing.images || [];
+    const bedsPerRoom = this._getListingBedsPerRoom(listing);
+    const gpsCoords = this._getListingGpsCoordinates(listing);
     
     let featuresHTML = '';
     if (listing.features && listing.features.length > 0) {
@@ -4847,8 +4883,8 @@ HOW TO USE THE APP:
       detailRows.push(['Bedrooms', listing.bedrooms]);
     if (listing.bathrooms !== undefined && listing.bathrooms !== '' && listing.bathrooms !== null)
       detailRows.push(['Bathrooms', listing.bathrooms]);
-    if (listing.bedsPerRoom !== undefined && listing.bedsPerRoom !== '' && listing.bedsPerRoom !== null)
-      detailRows.push(['Beds per Room', listing.bedsPerRoom]);
+    if (bedsPerRoom !== undefined && bedsPerRoom !== '' && bedsPerRoom !== null)
+      detailRows.push(['Beds per Room', bedsPerRoom]);
     if (listing.areaSqm !== undefined && listing.areaSqm !== '' && listing.areaSqm !== null)
       detailRows.push(['Area', listing.areaSqm + ' m²']);
     if (listing.categoryLabel) detailRows.push(['Category', listing.categoryLabel]);
@@ -4947,12 +4983,12 @@ HOW TO USE THE APP:
     }
     
     let gpsLocation = '';
-    if (listing.gpsCoordinates) {
+    if (gpsCoords) {
       gpsLocation = `
         <div class="gps-location" style="margin-bottom:20px;padding:16px;background:#f0f8ff;border-radius:12px;border-left:4px solid #2196F3;">
           <h3 style="margin-bottom:12px;font-size:16px;color:#2196F3;display:flex;align-items:center;gap:8px;"><i class="fas fa-map-marker-alt"></i> GPS Location</h3>
-          <code style="background:#fff;padding:6px 12px;border-radius:6px;border:1px solid #2196F3;color:#2196F3;font-weight:bold;">${listing.gpsCoordinates}</code>
-          <div style="display:flex;gap:12px;margin-top:12px;flex-wrap:wrap;"><button onclick="window.WW_APP.openInMaps('${listing.gpsCoordinates}')" style="background:#2196F3;border:1px solid #2196F3;color:#fff;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px;"><i class="fas fa-map-marked-alt"></i> View on Google Maps</button><button onclick="window.WW_APP.copyToClipboard('${listing.gpsCoordinates}')" style="background:#f0f0f0;border:1px solid #ddd;border-radius:8px;padding:10px 16px;cursor:pointer;">Copy Coordinates</button></div>
+          <code style="background:#fff;padding:6px 12px;border-radius:6px;border:1px solid #2196F3;color:#2196F3;font-weight:bold;">${gpsCoords}</code>
+          <div style="display:flex;gap:12px;margin-top:12px;flex-wrap:wrap;"><button onclick="window.WW_APP.openInMaps('${gpsCoords}')" style="background:#2196F3;border:1px solid #2196F3;color:#fff;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px;"><i class="fas fa-map-marked-alt"></i> View on Google Maps</button><button onclick="window.WW_APP.copyToClipboard('${gpsCoords}')" style="background:#f0f0f0;border:1px solid #ddd;border-radius:8px;padding:10px 16px;cursor:pointer;">Copy Coordinates</button></div>
         </div>`;
     }
     

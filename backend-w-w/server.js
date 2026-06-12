@@ -299,6 +299,17 @@ function tryParseJson(s, fallback) {
   try { return JSON.parse(s); } catch { return fallback; }
 }
 
+function parseGpsCoordinates(value) {
+  if (value == null) return null;
+  const match = String(value).match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng, text: `${lat}, ${lng}` };
+}
+
 function publicUser(u) {
   if (!u) return null;
   const o = u.toObject ? u.toObject() : u;
@@ -330,6 +341,7 @@ async function userIsAdmin(userId) {
 function publicListing(doc, viewerId) {
   const o = doc.toObject ? doc.toObject() : doc;
   const fields = o.fields && typeof o.fields === 'object' ? o.fields : {};
+  const parsedGps = parseGpsCoordinates(fields.gpsCoordinates ?? o.gpsCoordinates) || ((o.lat != null && o.lng != null) ? { lat: Number(o.lat), lng: Number(o.lng), text: `${o.lat}, ${o.lng}` } : null);
   return {
     id         : o._id?.toString?.() || o.id,
     clientId   : fields.clientId || o.clientId || undefined,
@@ -343,15 +355,15 @@ function publicListing(doc, viewerId) {
     priceText  : String(o.price ?? ''),
     currency   : o.currency,
     location   : o.location,
-    lat        : o.lat,
-    lng        : o.lng,
+    lat        : parsedGps ? parsedGps.lat : o.lat,
+    lng        : parsedGps ? parsedGps.lng : o.lng,
     images     : Array.isArray(o.images)   ? o.images   : [],
     features   : Array.isArray(o.features) ? o.features : [],
     bedrooms   : fields.bedrooms ?? o.bedrooms ?? '',
     bathrooms  : fields.bathrooms ?? o.bathrooms ?? '',
     bedsPerRoom: fields.bedsPerRoom ?? o.bedsPerRoom ?? '',
     areaSqm    : fields.areaSqm ?? o.areaSqm ?? '',
-    gpsCoordinates: fields.gpsCoordinates ?? o.gpsCoordinates ?? '',
+    gpsCoordinates: parsedGps ? parsedGps.text : '',
     contact    : fields.contact || o.contact || {},
     bidEnabled : fields.bidEnabled ?? o.bidEnabled ?? false,
     bidEndTime : fields.bidEndTime ?? o.bidEndTime ?? null,
@@ -390,8 +402,11 @@ function wallsListingToDoc(body, ownerId) {
   if (body.categoryLabel) extras.categoryLabel = body.categoryLabel;
   if (body.bedrooms != null) extras.bedrooms = body.bedrooms;
   if (body.bathrooms != null) extras.bathrooms = body.bathrooms;
+  if (body.bedsPerRoom != null) extras.bedsPerRoom = body.bedsPerRoom;
   if (body.areaSqm != null) extras.areaSqm = body.areaSqm;
+  if (body.gpsCoordinates != null) extras.gpsCoordinates = body.gpsCoordinates;
   if (body.contact) extras.contact = body.contact;
+  const parsedGps = parseGpsCoordinates(body.gpsCoordinates);
   return {
     ownerId,
     type: body.type || body.category,
@@ -401,8 +416,8 @@ function wallsListingToDoc(body, ownerId) {
     price: toNumberPrice(body.price),
     currency: body.currency || 'USD',
     location: body.location || '',
-    lat: body.lat ? Number(body.lat) : undefined,
-    lng: body.lng ? Number(body.lng) : undefined,
+    lat: body.lat ? Number(body.lat) : (parsedGps ? parsedGps.lat : undefined),
+    lng: body.lng ? Number(body.lng) : (parsedGps ? parsedGps.lng : undefined),
     features: Array.isArray(body.features) ? body.features : (tryParseJson(body.features, []) || []),
     fields: extras,
     status: body.status || 'active',
@@ -772,7 +787,7 @@ app.put('/api/listings/:id', authRequired, async (req, res) => {
     }
     const mergedFields = { ...(doc.fields || {}) };
     if (b.fields && typeof b.fields === 'object') Object.assign(mergedFields, b.fields);
-    ['categoryLabel', 'clientId', 'bedrooms', 'bathrooms', 'areaSqm', 'contact', 'bidEnabled'].forEach((k) => {
+    ['categoryLabel', 'clientId', 'bedrooms', 'bathrooms', 'bedsPerRoom', 'areaSqm', 'gpsCoordinates', 'contact', 'bidEnabled'].forEach((k) => {
       if (b[k] !== undefined) mergedFields[k] = b[k];
     });
     doc.fields = mergedFields;
@@ -896,7 +911,7 @@ app.put('/api/admin/listings/:id', authRequired, async (req, res) => {
       }));
     }
     const mergedFields = { ...(doc.fields || {}) };
-    ['categoryLabel', 'clientId', 'bedrooms', 'bathrooms', 'areaSqm', 'contact', 'bidEnabled',
+    ['categoryLabel', 'clientId', 'bedrooms', 'bathrooms', 'bedsPerRoom', 'areaSqm', 'gpsCoordinates', 'contact', 'bidEnabled',
       'isAd', 'adminPriority', 'verificationStatus', 'bidEnabled', 'bidEndTime', 'occupancyStatus', 'createdBy'
     ].forEach((k) => { if (b[k] !== undefined) mergedFields[k] = b[k]; });
     if (b.fields && typeof b.fields === 'object') Object.assign(mergedFields, b.fields);

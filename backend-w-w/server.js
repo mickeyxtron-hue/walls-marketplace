@@ -110,10 +110,18 @@ if (!S3_BUCKET) console.warn('[s3] AWS_BUCKET not set — S3 uploads disabled');
 // ---------------------------------------------------------------------------
 const app = express();
 
+// CORS: reflect any origin (allow all) with credentials enabled so the app
+// works from the published custom domain, *.onrender.com, Live Server
+// (http://127.0.0.1:5500, http://localhost:5500), and any future host.
 app.use(cors({
-  origin: CLIENT_ORIGIN === '*' ? true : CLIENT_ORIGIN,
+  origin: true,                 // reflect request Origin (cannot use '*' with credentials)
   credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','X-Requested-With','Accept','Origin'],
+  exposedHeaders: ['Content-Length','Content-Type'],
+  maxAge: 86400,
 }));
+app.options('*', cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(cookieParser());

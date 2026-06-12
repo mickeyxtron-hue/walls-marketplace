@@ -796,10 +796,29 @@ window.WW_APP = {
       bathrooms: listing.bathrooms,
       bedsPerRoom: listing.bedsPerRoom,
       areaSqm: listing.areaSqm,
+      gpsCoordinates: listing.gpsCoordinates,
       contact: listing.contact,
       bidEnabled: listing.bidEnabled,
       createdAt: listing.createdAt
     };
+  },
+
+  _getListingBedsPerRoom: function(listing) {
+    if (!listing) return '';
+    const fields = listing.fields && typeof listing.fields === 'object' ? listing.fields : {};
+    return listing.bedsPerRoom ?? fields.bedsPerRoom ?? '';
+  },
+
+  _getListingGpsCoordinates: function(listing) {
+    if (!listing) return '';
+    const fields = listing.fields && typeof listing.fields === 'object' ? listing.fields : {};
+    const raw = listing.gpsCoordinates || fields.gpsCoordinates || ((listing.lat != null && listing.lng != null) ? (listing.lat + ', ' + listing.lng) : '');
+    const m = String(raw || '').match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+    if (!m) return '';
+    const lat = Number(m[1]);
+    const lng = Number(m[2]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return '';
+    return lat + ', ' + lng;
   },
 
 
@@ -832,36 +851,49 @@ window.WW_APP = {
       /* Disclaimer removed app-wide */
       .footer-disclaimer { display: none !important; }
 
-      /* Bottom nav: keep base look from styles.css, but pin it to the
-         bottom of the viewport and make sure it never gets pushed off
-         the left edge or clipped on narrow screens. */
+      /* Bottom nav: Instagram-style floating pill. Always visible, centered,
+         compact, and pinned to the viewport so navigation can never push it
+         off-screen. */
       .bottom-nav {
         position: fixed !important;
         left: 50% !important;
         right: auto !important;
-        bottom: 0 !important;
+        top: auto !important;
+        bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
         transform: translateX(-50%) !important;
-        width: min(96vw, 520px) !important;
-        max-width: 96vw !important;
+        width: min(94vw, 460px) !important;
+        max-width: 94vw !important;
         margin: 0 auto !important;
         box-sizing: border-box !important;
-        z-index: 9999 !important;
+        z-index: 2147483000 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-around !important;
+        gap: 2px !important;
+        padding: 6px 10px !important;
+        border-radius: 999px !important;
+        background: var(--nav-bg, rgba(28,28,30,0.92)) !important;
+        backdrop-filter: saturate(180%) blur(18px) !important;
+        -webkit-backdrop-filter: saturate(180%) blur(18px) !important;
+        border: 1px solid var(--border-color, rgba(255,255,255,0.08)) !important;
+        box-shadow: 0 10px 32px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.18) !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        transition: none !important;
       }
+      .bottom-nav.hidden, .bottom-nav[hidden] { display: flex !important; }
 
       @media (max-width: 768px) {
         html, body { overscroll-behavior-x: none !important; overscroll-behavior-y: auto !important; }
         body { overflow-x: hidden !important; }
         #appView, #landingView, #sellerView, #adminView, .app-container, .content-wrapper, .main-content { width:100%; max-width:100%; overflow-x:hidden; }
         .bottom-nav {
-          width: 94vw !important;
-          max-width: 94vw !important;
-          left: 50% !important;
-          right: auto !important;
-          transform: translateX(-50%) !important;
-          padding-left: 4px !important;
-          padding-right: 4px !important;
+          width: min(94vw, 420px) !important;
+          bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
         }
         .bottom-nav-tab, .bottom-nav-search { min-width: 0 !important; flex: 1 1 0 !important; }
+
         .category-section-horizontal { padding: 0 8px; margin-bottom: 18px; }
         .horizontal-listings-grid { gap:10px; }
         .horizontal-listings-grid .listing-card.mobile { width: calc((100vw - 28px) / 2) !important; flex: 0 0 calc((100vw - 28px) / 2) !important; }
@@ -1491,10 +1523,12 @@ window.WW_APP = {
       if (l.fields.bathrooms != null && l.bathrooms == null) l.bathrooms = l.fields.bathrooms;
       if (l.fields.bedsPerRoom != null && (l.bedsPerRoom === undefined || l.bedsPerRoom === null || l.bedsPerRoom === '')) l.bedsPerRoom = l.fields.bedsPerRoom;
       if (l.fields.areaSqm != null && l.areaSqm == null) l.areaSqm = l.fields.areaSqm;
+      if (l.fields.gpsCoordinates != null && !l.gpsCoordinates) l.gpsCoordinates = l.fields.gpsCoordinates;
       if (l.fields.categoryLabel && !l.categoryLabel) l.categoryLabel = l.fields.categoryLabel;
       if (l.fields.clientId && !l.clientId) l.clientId = l.fields.clientId;
       if (l.fields.contact && !l.contact) l.contact = l.fields.contact;
     }
+    if (!l.gpsCoordinates && l.lat != null && l.lng != null) l.gpsCoordinates = l.lat + ', ' + l.lng;
     if (!l.category && l.fields && l.fields.category) l.category = l.fields.category;
     l.categoryLabel = this._resolveCategoryLabel(l);
     if (!l.contact) l.contact = { name: '', email: '', phone: '' };
@@ -4115,9 +4149,11 @@ HOW TO USE THE APP:
         this.showSellerView();
         break;
       case 'recent':
+        document.querySelectorAll('.category-picker-modal, .ww-popup').forEach(function(p){ p.remove(); });
         this.showRecentEnquiries();
         break;
       case 'mylistings':
+        document.querySelectorAll('.category-picker-modal, .ww-popup').forEach(function(p){ p.remove(); });
         this.showMyListingsHub();
         break;
     }
@@ -4825,6 +4861,8 @@ HOW TO USE THE APP:
     const isMobile = window.innerWidth <= 768;
     this.currentImageIndex = 0;
     this.currentListingImages = listing.images || [];
+    const bedsPerRoom = this._getListingBedsPerRoom(listing);
+    const gpsCoords = this._getListingGpsCoordinates(listing);
     
     let featuresHTML = '';
     if (listing.features && listing.features.length > 0) {
@@ -4845,8 +4883,8 @@ HOW TO USE THE APP:
       detailRows.push(['Bedrooms', listing.bedrooms]);
     if (listing.bathrooms !== undefined && listing.bathrooms !== '' && listing.bathrooms !== null)
       detailRows.push(['Bathrooms', listing.bathrooms]);
-    if (listing.bedsPerRoom !== undefined && listing.bedsPerRoom !== '' && listing.bedsPerRoom !== null)
-      detailRows.push(['Beds per Room', listing.bedsPerRoom]);
+    if (bedsPerRoom !== undefined && bedsPerRoom !== '' && bedsPerRoom !== null)
+      detailRows.push(['Beds per Room', bedsPerRoom]);
     if (listing.areaSqm !== undefined && listing.areaSqm !== '' && listing.areaSqm !== null)
       detailRows.push(['Area', listing.areaSqm + ' m²']);
     if (listing.categoryLabel) detailRows.push(['Category', listing.categoryLabel]);
@@ -4945,12 +4983,12 @@ HOW TO USE THE APP:
     }
     
     let gpsLocation = '';
-    if (listing.gpsCoordinates) {
+    if (gpsCoords) {
       gpsLocation = `
         <div class="gps-location" style="margin-bottom:20px;padding:16px;background:#f0f8ff;border-radius:12px;border-left:4px solid #2196F3;">
           <h3 style="margin-bottom:12px;font-size:16px;color:#2196F3;display:flex;align-items:center;gap:8px;"><i class="fas fa-map-marker-alt"></i> GPS Location</h3>
-          <code style="background:#fff;padding:6px 12px;border-radius:6px;border:1px solid #2196F3;color:#2196F3;font-weight:bold;">${listing.gpsCoordinates}</code>
-          <div style="display:flex;gap:12px;margin-top:12px;"><a href="https://maps.google.com/?q=${encodeURIComponent(listing.gpsCoordinates)}" target="_blank" style="background:#2196F3;color:white;padding:10px 16px;border-radius:8px;text-decoration:none;">View on Google Maps</a><button onclick="window.WW_APP.copyToClipboard('${listing.gpsCoordinates}')" style="background:#f0f0f0;border:1px solid #ddd;border-radius:8px;padding:10px 16px;cursor:pointer;">Copy Coordinates</button></div>
+          <code style="background:#fff;padding:6px 12px;border-radius:6px;border:1px solid #2196F3;color:#2196F3;font-weight:bold;">${gpsCoords}</code>
+          <div style="display:flex;gap:12px;margin-top:12px;flex-wrap:wrap;"><button onclick="window.WW_APP.openInMaps('${gpsCoords}')" style="background:#2196F3;border:1px solid #2196F3;color:#fff;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px;"><i class="fas fa-map-marked-alt"></i> View on Google Maps</button><button onclick="window.WW_APP.copyToClipboard('${gpsCoords}')" style="background:#f0f0f0;border:1px solid #ddd;border-radius:8px;padding:10px 16px;cursor:pointer;">Copy Coordinates</button></div>
         </div>`;
     }
     
@@ -5081,6 +5119,25 @@ HOW TO USE THE APP:
       document.body.removeChild(ta);
       showToast('Copied!', 'success');
     });
+  },
+
+  openInMaps: function(coords) {
+    if (!coords) { showToast('No coordinates available', 'error'); return; }
+    var m = String(coords).match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+    if (!m) { showToast('Invalid coordinates', 'error'); return; }
+    var lat = m[1], lng = m[2];
+    var ua = navigator.userAgent || '';
+    var isIOS = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document);
+    var gmaps = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
+    if (isIOS) {
+      if (window.confirm('Open in Apple Maps? (Cancel = Google Maps)')) {
+        window.location.href = 'maps://?q=' + lat + ',' + lng;
+      } else {
+        window.open(gmaps, '_blank');
+      }
+    } else {
+      window.open(gmaps, '_blank');
+    }
   },
   
   showImage: function(index) {
@@ -5363,7 +5420,7 @@ HOW TO USE THE APP:
           </div>
         </div>
         
-        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
           <div class="form-group">
             <label for="bedrooms">Bedrooms</label>
             <input type="number" id="bedrooms" name="bedrooms" min="0" placeholder="e.g., 3" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
@@ -5373,14 +5430,12 @@ HOW TO USE THE APP:
             <input type="number" id="bathrooms" name="bathrooms" min="0" placeholder="e.g., 2" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
           </div>
           <div class="form-group">
-            <label for="areaSqm">Area (m²) <span style="font-weight:400;color:#888;">(optional)</span></label>
-            <input type="number" id="areaSqm" name="areaSqm" min="0" step="1" placeholder="e.g., 120" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
-          </div>
-        </div>
-        <div class="form-row" style="display:grid;grid-template-columns:1fr;gap:16px;">
-          <div class="form-group">
             <label for="bedsPerRoom">Beds per Room <span style="font-weight:400;color:#888;">(optional)</span></label>
             <input type="number" id="bedsPerRoom" name="bedsPerRoom" min="0" placeholder="e.g., 2" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
+          </div>
+          <div class="form-group">
+            <label for="areaSqm">Area (m²) <span style="font-weight:400;color:#888;">(optional)</span></label>
+            <input type="number" id="areaSqm" name="areaSqm" min="0" step="1" placeholder="e.g., 120" style="width:100%;padding:12px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;">
           </div>
         </div>
       `;
@@ -5624,7 +5679,7 @@ HOW TO USE THE APP:
         return `
       <div class="form-group">
         <label for="images">${_label}</label>
-        <input type="file" id="images" name="images" accept="image/*,.heic,.heif,.webp,.avif,.jfif,.bmp,.tif,.tiff,.svg" ${_multiple} ${_required} style="width:100%;padding:12px;border:2px dashed #e0e0e0;border-radius:8px;background:#f9f9f9;cursor:pointer;">
+        <input type="file" id="images" name="images" accept="image/*,.heic,.heif,.webp,.avif,.jfif,.bmp,.tif,.tiff,.svg" ${_multiple} ${_required} style="width:100%;padding:14px;border:2px dashed #C8B897;border-radius:8px;background:#FBF7EE;cursor:pointer;color:#7a6843;font-weight:700;font-size:15px;">
         <div id="imagePreview" class="image-preview" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(100px, 1fr));gap:12px;margin-top:16px;"></div>
       </div>`;
       })()}
@@ -7789,35 +7844,48 @@ HOW TO USE THE APP:
   // ---- Theme picker ----
   themes: {
     beige: {
-      '--primary': '#C8B897', '--primary-dark': '#A89B7A',
-      '--primary-soft': 'rgba(200,184,151,0.16)',
+      '--primary': '#E1306C', '--primary-dark': '#C13584',
+      '--primary-soft': 'rgba(225,48,108,0.16)',
       '--bg': '#FAF8F3', '--surface': '#FFFFFF', '--surface-2': '#F4F1EA',
       '--card': '#FFFFFF', '--text': '#1F1B16', '--text-muted': '#6E6658',
       '--border-color': '#E8E2D5',
-      '--nav-bg': '#FFFFFF', '--nav-active-bg': '#C8B897', '--nav-active-fg': '#1F1B16',
+      '--nav-bg': '#FFFFFF', '--nav-active-bg': '#E1306C', '--nav-active-fg': '#FFFFFF',
       '--nav-inactive-fg': '#6E6658'
     },
     navy: {
-      '--primary': '#C8A84E', '--primary-dark': '#B58E30',
-      '--primary-soft': 'rgba(200,168,78,0.16)',
+      '--primary': '#E1306C', '--primary-dark': '#C13584',
+      '--primary-soft': 'rgba(225,48,108,0.16)',
       '--bg': '#0B1220', '--surface': '#121C2E', '--surface-2': '#1A2438',
       '--card': '#152033', '--text': '#F1F4FA', '--text-muted': '#9AA6BD',
       '--border-color': 'rgba(255,255,255,0.08)',
-      '--brand': '#C8A84E',
-      '--nav-bg': '#152033', '--nav-active-bg': '#C8A84E', '--nav-active-fg': '#0B1220',
+      '--brand': '#E1306C',
+      '--nav-bg': '#152033', '--nav-active-bg': '#E1306C', '--nav-active-fg': '#FFFFFF',
       '--nav-inactive-fg': '#9AA6BD'
     },
     copper: {
-      '--primary': '#B87333', '--primary-dark': '#8a5524',
-      '--primary-soft': 'rgba(184,115,51,0.16)',
+      '--primary': '#E1306C', '--primary-dark': '#C13584',
+      '--primary-soft': 'rgba(225,48,108,0.16)',
       '--bg': '#171311', '--surface': '#211B17', '--surface-2': '#2A221C',
       '--card': '#241D18', '--text': '#F3EBE2', '--text-muted': '#B8A99A',
       '--border-color': 'rgba(255,255,255,0.08)',
-      '--brand': '#B87333',
-      '--nav-bg': '#241D18', '--nav-active-bg': '#B87333', '--nav-active-fg': '#FFFFFF',
+      '--brand': '#E1306C',
+      '--nav-bg': '#241D18', '--nav-active-bg': '#E1306C', '--nav-active-fg': '#FFFFFF',
       '--nav-inactive-fg': '#B8A99A'
+    },
+    instagram: {
+      '--primary': '#E1306C', '--primary-dark': '#C13584',
+      '--primary-soft': 'rgba(225,48,108,0.18)',
+      '--bg': '#000000', '--surface': '#101010', '--surface-2': '#1C1C1E',
+      '--card': '#121212', '--text': '#FFFFFF', '--text-muted': '#A8A8A8',
+      '--border-color': 'rgba(255,255,255,0.10)',
+      '--brand': '#E1306C',
+      '--nav-bg': 'rgba(20,20,22,0.92)',
+      '--nav-active-bg': 'rgba(255,255,255,0.14)',
+      '--nav-active-fg': '#FFFFFF',
+      '--nav-inactive-fg': 'rgba(255,255,255,0.78)'
     }
   },
+
   applyTheme: function(name) {
     const t = this.themes[name] || this.themes.beige;
     const root = document.documentElement;
@@ -7848,10 +7916,12 @@ HOW TO USE THE APP:
           <button data-x style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted,#888);">&times;</button>
         </div>
         ${[
-          { k:'beige',  label:'Warm Beige',                    swatches:['#C8B897','#A89B7A','#fafafa','#333333'] },
-          { k:'navy',   label:'Deep Navy + Gold',              swatches:['#0F1A2A','#1A2A3A','#C8A84E','#F8F9FA'] },
-          { k:'copper', label:'Charcoal + Copper / Rose Gold', swatches:['#2B2B2B','#B87333','#D4A373','#FDFBF7'] }
+          { k:'beige',     label:'Warm Beige',                    swatches:['#C8B897','#A89B7A','#fafafa','#333333'] },
+          { k:'navy',      label:'Deep Navy + Gold',              swatches:['#0F1A2A','#1A2A3A','#C8A84E','#F8F9FA'] },
+          { k:'copper',    label:'Charcoal + Copper / Rose Gold', swatches:['#2B2B2B','#B87333','#D4A373','#FDFBF7'] },
+          { k:'instagram', label:'Dark Red',                      swatches:['#000000','#1C1C1E','#E1306C','#F5F5F5'] }
         ].map(t => `
+
           <button data-t="${t.k}" style="display:flex;align-items:center;gap:14px;width:100%;padding:12px;margin-bottom:10px;border:2px solid ${cur===t.k?'var(--primary,#C8A84E)':'var(--border-color,#eee)'};border-radius:12px;background:var(--surface,#fff);color:var(--text,#222);cursor:pointer;text-align:left;">
             <div style="display:flex;gap:4px;">
               ${t.swatches.map(s => `<span style="width:22px;height:22px;border-radius:6px;background:${s};display:inline-block;border:1px solid rgba(0,0,0,.06);"></span>`).join('')}
